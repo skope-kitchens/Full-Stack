@@ -12,7 +12,9 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true,
-    allowedHosts: "all",
+    allowedHosts: [
+      ".emergentcf.cloud" 
+    ],
     proxy: {
       '/api': {
         target: 'http://localhost:5002',
@@ -21,4 +23,3 @@ export default defineConfig({
     }
   }
 })
-
