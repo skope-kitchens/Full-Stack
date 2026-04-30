@@ -30,6 +30,7 @@ const Login = () => {
     setStatus({ type: '', message: '' })
 
     try {
+      console.log("API URL:", import.meta.env.VITE_API_BASE_URL);
       const { data } = await api.post('/api/auth/login', {
         email: formData.email,
         password: formData.password
@@ -66,6 +67,7 @@ const Login = () => {
       setTimeout(() => navigate('/'), 600)
 
     } catch (error) {
+      console.error("LOGIN ERROR:", error);
       const message =
         error.response?.data?.message ||
         'Unable to login. Please check your credentials.'

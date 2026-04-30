@@ -70,20 +70,12 @@ io.on("connection", (socket) => {
 
 app.set("io", io);
 
-app.use(
-  cors({
-    origin: [
-      "https://sk-peach-two.vercel.app",
-      "http://localhost:3000",
-      "http://localhost:3001",
-    ],
-    credentials: true,
-    methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    allowedHeaders: "Content-Type,Authorization,Accept,X-Requested-With"
-  })
-);
+app.use(cors({
+  origin: ["http://localhost", "https://localhost"],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
 
-// explicitly handle preflight
 app.options("*", cors());
 
 
