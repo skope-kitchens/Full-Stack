@@ -46,7 +46,7 @@ const server = http.createServer(app);
 
 const rawOrigins =
   process.env.CLIENT_ORIGIN ||
-  "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://127.0.0.1:3000,http://localhost:5173,https://sk-peach-two.vercel.app";
+  "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://sk-peach-two.vercel.app";
 
 const allowedOrigins = rawOrigins
   .split(",")
@@ -70,20 +70,13 @@ io.on("connection", (socket) => {
 
 app.set("io", io);
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS blocked: ${origin}`));
-    }
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true,
-};
+app.use(cors({
+  origin: ["http://localhost", "https://localhost"],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
 
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+app.options("*", cors());
 
 
 

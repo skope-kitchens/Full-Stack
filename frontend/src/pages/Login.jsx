@@ -36,34 +36,35 @@ const Login = () => {
         password: formData.password
       })
 
-      if (data.token) {
-        localStorage.setItem("token", data.token);
-        authUtils.setAuth(data.token);
+      // save token + profile
+      authUtils.setAuth(data.token);
 
-        localStorage.setItem("userType", data.userType);
+      // 🔑 SAVE USER TYPE (client / vendor / admin)
+      localStorage.setItem("userType", data.userType);
 
-        if (data.userType === "admin" && data.role) {
-          localStorage.setItem("adminRole", data.role);
-        } else {
-          localStorage.removeItem("adminRole");
-        }
-
-        if (data.user || data.vendor) {
-          sessionStorage.setItem(
-            "skope_user",
-            JSON.stringify(data.user || data.vendor)
-          );
-        }
-
-        setStatus({
-          type: 'success',
-          message: 'Login successful! Redirecting...'
-        })
-
-        setTimeout(() => navigate('/'), 600)
+      // 🔑 SAVE ADMIN ROLE (for role-based dashboard), if present
+      if (data.userType === "admin" && data.role) {
+        localStorage.setItem("adminRole", data.role);
       } else {
-        setStatus({ type: 'error', message: 'Login failed. Please check your credentials.' })
+        localStorage.removeItem("adminRole");
       }
+
+      // ✅ ONLY save user object if it exists (NOT for admin)
+      if (data.user || data.vendor) {
+        sessionStorage.setItem(
+          "skope_user",
+          JSON.stringify(data.user || data.vendor)
+        );
+      }
+
+
+      setStatus({
+        type: 'success',
+        message: 'Login successful! Redirecting...'
+      })
+
+      // redirect to dashboard
+      setTimeout(() => navigate('/'), 600)
 
     } catch (error) {
       console.error("LOGIN ERROR:", error);

@@ -1,9 +1,6 @@
 // src/utils/api.js
 import axios from "axios";
 
-console.log("ENV:", import.meta.env.VITE_API_BASE_URL);
-console.log("TEST ENV:", import.meta.env.VITE_TEST);
-
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:5002",
 });
