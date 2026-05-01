@@ -44,14 +44,24 @@ connectDB()
 const app = express()
 const server = http.createServer(app);
 
-const rawOrigins =
-  process.env.CLIENT_ORIGIN ||
-  "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://sk-peach-two.vercel.app";
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "https://full-stack-ten-pearl.vercel.app",
+  "https://full-stack-ro52dru41-skope-kitchens-projects.vercel.app",
+];
 
-const allowedOrigins = rawOrigins
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS blocked: ${origin}`));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true,
+};
 
 const io = new SocketIOServer(server, {
   cors: {
@@ -70,13 +80,8 @@ io.on("connection", (socket) => {
 
 app.set("io", io);
 
-app.use(cors({
-  origin: ["http://localhost", "https://localhost"],
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
-
-app.options("*", cors());
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 
 
