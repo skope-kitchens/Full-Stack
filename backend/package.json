@@ -1,0 +1,34 @@
+{
+  "name": "skope-kitchens-server",
+  "version": "1.0.0",
+  "description": "Backend server for Skope Kitchens Vendor Portal",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "aws4": "^1.13.2",
+    "axios": "^1.13.2",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^1.41.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "googleapis": "^171.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.3",
+    "multer": "^2.0.2",
+    "multer-storage-cloudinary": "^4.0.0",
+    "node-cron": "^4.2.1",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^6.10.1",
+    "nodemon": "^3.1.11",
+    "openai": "^6.9.1",
+    "razorpay": "^2.9.6",
+    "socket.io": "^4.8.3",
+    "uuid": "^13.0.0"
+  }
+}
