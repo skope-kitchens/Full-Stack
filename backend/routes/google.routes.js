@@ -27,7 +27,7 @@ router.get("/auth", (req, res) => {
     scope: CAL_SCOPE,
   });
 
-  res.json({ authUrl: url });
+  res.redirect(url);
 });
 
 /**
