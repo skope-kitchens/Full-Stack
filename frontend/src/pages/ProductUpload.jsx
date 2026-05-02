@@ -96,7 +96,7 @@ export default function ProductUpload() {
         totalAmount: totalCost,
     };
 
-    const res = await fetch("http://localhost:5002/api/products", {
+    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || "https://full-stack-8ug9.onrender.com"}/api/products`, {
         method: "POST",
         headers: {
         "Content-Type": "application/json",

@@ -36,7 +36,7 @@ export default function VendorDashboard() {
     const fetchProducts = async () => {
       try {
         const res = await fetch(
-          `http://localhost:5002/api/products?supplierName=${encodeURIComponent(
+          `${import.meta.env.VITE_API_BASE_URL || "https://full-stack-8ug9.onrender.com"}/api/products?supplierName=${encodeURIComponent(
             vendorName
           )}`
         );
