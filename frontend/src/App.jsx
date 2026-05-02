@@ -23,6 +23,7 @@ import AddRecipe from './pages/AddRecipe'
 import ClientInventory from "./pages/ClientInventory";
 import AddTrialRecipe from "./pages/AddTrialRecipe";
 import AddTrainingRecipe from "./pages/AddTrainingRecipe";
+import GoogleSuccess from "./pages/GoogleSuccess";
 function App() {
   return (
     <Router
@@ -57,6 +58,7 @@ function App() {
         <Route path="/add-trial-recipe" element={<AddTrialRecipe />}/>
         <Route path="/add-training-recipe" element={<AddTrainingRecipe />}/>
         <Route path="/client-inventory" element={<ClientInventory />}/>
+        <Route path="/google-success" element={<GoogleSuccess />}/>
       </Routes>
     </Router>
   )
