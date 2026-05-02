@@ -49,14 +49,17 @@ const allowedOrigins = [
   "http://localhost:5173",
   "https://full-stack-ten-pearl.vercel.app",
   "https://full-stack-ro52dru41-skope-kitchens-projects.vercel.app",
+  "https://full-stack-q4vagpfkk-skope-kitchens-projects.vercel.app",
 ];
+
+const vercelPreviewPattern = /^https:\/\/full-stack-[a-z0-9]+-skope-kitchens-projects\.vercel\.app$/;
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin) || vercelPreviewPattern.test(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`CORS blocked: ${origin}`));
+      callback(null, false);
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
