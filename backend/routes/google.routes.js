@@ -49,9 +49,7 @@ router.get("/callback", async (req, res) => {
     const { tokens } = await oauth2.getToken(code);
     await storeTokens(tokens);
 
-    res.send(
-      "<h2>Google Calendar connected successfully</h2><p>You can close this window. The server will use this authorization for calendar operations.</p>"
-    );
+    return res.redirect("https://full-stack-ten-pearl.vercel.app/google-success");
   } catch (err) {
     console.error("[GoogleError]", err?.message || err);
     res.status(500).send(`Authorization failed: ${err.message}`);
