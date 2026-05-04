@@ -48,25 +48,9 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
-  "https://full-stack-ten-pearl.vercel.app",
-  "https://full-stack-ro52dru41-skope-kitchens-projects.vercel.app",
-  "https://full-stack-q4vagpfkk-skope-kitchens-projects.vercel.app",
+  "http://localhost:3007",
+  "https://full-stack-8ug9.onrender.com",
 ];
-
-const vercelPreviewPattern = /^https:\/\/full-stack-[a-z0-9]+-skope-kitchens-projects\.vercel\.app$/;
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || vercelPreviewPattern.test(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, false);
-    }
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-};
 
 const io = new SocketIOServer(server, {
   cors: {
@@ -85,8 +69,18 @@ io.on("connection", (socket) => {
 
 app.set("io", io);
 
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true
+}));
 
 
 

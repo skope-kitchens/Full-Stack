@@ -36,6 +36,9 @@ const Login = () => {
         password: formData.password
       })
 
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("adminRole", data.role);
+
       // save token + profile
       authUtils.setAuth(data.token);
 
