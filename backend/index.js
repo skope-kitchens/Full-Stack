@@ -50,6 +50,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3007",
   "https://full-stack-8ug9.onrender.com",
+  "http://localhost:3011",
 ];
 
 const io = new SocketIOServer(server, {
