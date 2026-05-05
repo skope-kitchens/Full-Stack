@@ -49,8 +49,9 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   "http://localhost:3007",
-  "https://full-stack-8ug9.onrender.com",
+  "http://localhost:3010",
   "http://localhost:3011",
+  "https://full-stack-8ug9.onrender.com",
 ];
 
 const io = new SocketIOServer(server, {
