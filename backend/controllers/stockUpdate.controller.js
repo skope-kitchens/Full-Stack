@@ -65,6 +65,29 @@ export async function upsertStockUpdate(req, res) {
   }
 }
 
+export async function listAllStockUpdates(req, res) {
+  try {
+    const list = await StockUpdate.find({})
+      .sort({ date: -1, brandName: 1 })
+      .lean();
+
+    const data = (list || []).map((d) => ({
+      _id: d._id,
+      brandId: d.brandId,
+      brandName: d.brandName,
+      date: new Date(d.date).toISOString().slice(0, 10),
+      items: d.items || [],
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+    }));
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error("listAllStockUpdates error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to fetch stock updates" });
+  }
+}
+
 export async function listStockUpdatesByBrand(req, res) {
   try {
     const { brandId } = req.query || {};

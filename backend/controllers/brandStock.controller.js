@@ -52,24 +52,44 @@ export const transferBrandStock = async (req, res) => {
       return res.status(400).json({ message: "fromBrandName and toBrandName must be different" });
     }
 
-    const fromDoc = await BrandStock.findOne({ brandName: from, itemName: item, ingredientBrand: ingBrand });
-    if (!fromDoc || Number(fromDoc.qtyRemaining || 0) < quantity) {
+    // Atomic check-and-decrement: filter enforces status + sufficient qty in one operation.
+    // Prevents double-spend: two concurrent requests both pass the filter only if qtyRemaining
+    // can cover both — MongoDB applies the filter and $inc atomically at the document level.
+    const fromDoc = await BrandStock.findOneAndUpdate(
+      {
+        brandName: from,
+        itemName: item,
+        ingredientBrand: ingBrand,
+        status: "Pending",
+        qtyRemaining: { $gte: quantity },
+      },
+      {
+        $inc: { qtyRemaining: -quantity },
+        $push: {
+          history: {
+            type: "TRANSFER_OUT",
+            qty: quantity,
+            uom: unit,
+            at: new Date(),
+            fromBrandName: from,
+            toBrandName: to,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!fromDoc) {
+      // Diagnostic read to preserve original specific error messages.
+      const existing = await BrandStock.findOne(
+        { brandName: from, itemName: item, ingredientBrand: ingBrand },
+        { status: 1, qtyRemaining: 1 }
+      ).lean();
+      if (existing && String(existing.status || "Pending") !== "Pending") {
+        return res.status(400).json({ message: "This ingredient is marked Used and cannot be transferred" });
+      }
       return res.status(400).json({ message: "Insufficient stock to transfer" });
     }
-    if (String(fromDoc.status || "Pending") !== "Pending") {
-      return res.status(400).json({ message: "This ingredient is marked Used and cannot be transferred" });
-    }
-
-    fromDoc.qtyRemaining = Number(fromDoc.qtyRemaining || 0) - quantity;
-    fromDoc.history.push({
-      type: "TRANSFER_OUT",
-      qty: quantity,
-      uom: unit || fromDoc.uom,
-      at: new Date(),
-      fromBrandName: from,
-      toBrandName: to,
-    });
-    await fromDoc.save();
 
     const toDoc = await BrandStock.findOneAndUpdate(
       { brandName: to, itemName: item, ingredientBrand: ingBrand },
@@ -122,6 +142,52 @@ export const markBrandStockUsed = async (req, res) => {
   } catch (err) {
     console.error("Mark brand stock used error:", err?.message || err);
     return res.status(500).json({ message: "Failed to mark used" });
+  }
+};
+
+export const reconcileStock = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const newQty = Number(req.body?.qtyRemaining);
+    const note = String(req.body?.note || "").trim() || "Daily reconciliation";
+
+    if (!Number.isFinite(newQty) || newQty < 0) {
+      return res.status(400).json({ message: "qtyRemaining must be a non-negative number" });
+    }
+
+    const current = await BrandStock.findById(id).lean();
+    if (!current) return res.status(404).json({ message: "Stock item not found" });
+
+    const previousQty = Number(current.qtyRemaining || 0);
+
+    if (previousQty === newQty) {
+      return res.json({ success: true, unchanged: true, data: current });
+    }
+
+    const updated = await BrandStock.findByIdAndUpdate(
+      id,
+      {
+        $set: { qtyRemaining: newQty },
+        $push: {
+          history: {
+            type: "RECONCILIATION",
+            previousQty,
+            newQty,
+            uom: current.uom || "",
+            note,
+            at: new Date(),
+          },
+        },
+      },
+      { new: true }
+    ).lean();
+
+    if (!updated) return res.status(404).json({ message: "Stock item not found" });
+    return res.json({ success: true, data: updated });
+
+  } catch (err) {
+    console.error("reconcileStock error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to reconcile stock" });
   }
 };
 

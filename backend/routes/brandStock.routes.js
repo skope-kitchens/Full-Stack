@@ -7,6 +7,7 @@ import {
   transferBrandStock,
   deleteBrandStockItem,
   markBrandStockUsed,
+  reconcileStock,
 } from "../controllers/brandStock.controller.js";
 
 const router = express.Router();
@@ -31,6 +32,13 @@ router.patch(
   authMiddleware,
   requireRole("RECIPE_MANAGER"),
   markBrandStockUsed
+);
+
+router.patch(
+  "/brand-stock/:id/reconcile",
+  authMiddleware,
+  requireRole("INGREDIENT_MANAGER"),
+  reconcileStock
 );
 
 export default router;

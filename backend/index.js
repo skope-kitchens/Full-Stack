@@ -45,18 +45,20 @@ connectDB()
 const app = express()
 const server = http.createServer(app);
 
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:5173",
-  "http://localhost:3007",
-  "http://localhost:3010",
-  "http://localhost:3011",
+const productionOrigins = [
   "https://full-stack-8ug9.onrender.com",
 ];
 
+const localhostPattern = /^http:\/\/localhost:\d+$/;
+
+const isAllowedOrigin = (origin) =>
+  !origin || localhostPattern.test(origin) || productionOrigins.includes(origin);
+
 const io = new SocketIOServer(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      callback(null, isAllowedOrigin(origin));
+    },
     credentials: true,
     methods: ["GET", "POST"],
   },
@@ -72,8 +74,10 @@ io.on("connection", (socket) => {
 app.set("io", io);
 
 app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
+  origin: (origin, callback) => {
+    callback(null, isAllowedOrigin(origin));
+  },
+  credentials: true,
 }));
 
 

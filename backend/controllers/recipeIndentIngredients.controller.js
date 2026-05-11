@@ -46,6 +46,7 @@ async function expandRecipeToLeafIngredients({
   brand,
   cache,
   out,
+  visited = new Set(),
 }) {
   for (const item of items || []) {
     if (!item) continue;
@@ -68,14 +69,28 @@ async function expandRecipeToLeafIngredients({
     });
     if (!sub) continue;
 
-    const nextMultiplier = multiplier * Number(item.quantity || 0);
+    const subId = sub._id.toString();
+    if (visited.has(subId)) {
+      console.warn(`[RecipeExpansion] Circular reference detected: "${item.refId}" is already in the current expansion path. Skipping.`);
+      continue;
+    }
+
+    const batchYield = Number(sub.yield || 0);
+    const scaleFactor = batchYield > 0
+      ? Number(item.quantity || 0) / batchYield
+      : Number(item.quantity || 0);
+    const nextMultiplier = multiplier * scaleFactor;
+
+    visited.add(subId);
     await expandRecipeToLeafIngredients({
       items: sub.items,
       multiplier: nextMultiplier,
       brand: sub.brand || brand,
       cache,
       out,
+      visited,
     });
+    visited.delete(subId);
   }
 }
 

@@ -2,12 +2,13 @@ import mongoose from "mongoose";
 
 const historySchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ["ISSUE", "TRANSFER_IN", "TRANSFER_OUT"], required: true },
+    type: { type: String, enum: ["ISSUE", "TRANSFER_IN", "TRANSFER_OUT", "RECONCILIATION"], required: true },
     qty: { type: Number, required: true },
     uom: { type: String, default: "" },
     at: { type: Date, default: Date.now },
     fromBrandName: { type: String, default: "" },
     toBrandName: { type: String, default: "" },
+    note: { type: String, default: "" },
   },
   { _id: false }
 );

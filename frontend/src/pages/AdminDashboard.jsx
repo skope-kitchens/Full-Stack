@@ -21,6 +21,8 @@ const AdminDashboard = () => {
   const [showRecipeInventoryModal, setShowRecipeInventoryModal] = useState(false);
   const [notifCounts, setNotifCounts] = useState(null);
   const [showFcrModal, setShowFcrModal] = useState(false);
+  const [showCheckStockModal, setShowCheckStockModal] = useState(false);
+  const [showStockUpdateModal, setShowStockUpdateModal] = useState(false);
   const navigate = useNavigate();
   const search = typeof window !== "undefined" ? window.location.search : "";
 
@@ -241,6 +243,30 @@ const AdminDashboard = () => {
                         Stock (Rista)
                       </button>
                     )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowCheckStockModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Check Stock
+                      </button>
+                    )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowStockUpdateModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Stock Update
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -310,6 +336,16 @@ const AdminDashboard = () => {
           <RecipeInventoryModal
             onClose={() => setShowRecipeInventoryModal(false)}
           />
+        )}
+
+        {/* Check Stock modal for ingredient manager */}
+        {isIngredientManager && showCheckStockModal && (
+          <CheckStockModal onClose={() => setShowCheckStockModal(false)} />
+        )}
+
+        {/* Stock Update modal for ingredient manager */}
+        {isIngredientManager && showStockUpdateModal && (
+          <StockUpdateModal onClose={() => setShowStockUpdateModal(false)} />
         )}
 
         {/* FCR breakdown modal */}
@@ -2936,6 +2972,319 @@ function FcrModal({ onClose }) {
             Close
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- CHECK STOCK MODAL ---------- */
+function CheckStockModal({ onClose }) {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const fetchAll = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/api/stock-updates/all");
+      setRecords(res.data?.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to fetch stock data");
+      setRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAll();
+  }, []);
+
+  const filtered = records.filter(
+    (r) =>
+      !search ||
+      r.brandName?.toLowerCase().includes(search.toLowerCase()) ||
+      r.date?.includes(search)
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Check Stock</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
+        </div>
+
+        <div className="p-4 border-b flex gap-3 items-center">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter by brand or date (YYYY-MM-DD)"
+            className="border rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:ring-2 focus:ring-black"
+          />
+          <button
+            type="button"
+            onClick={fetchAll}
+            disabled={loading}
+            className="px-4 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {error && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {loading && (
+            <p className="text-center text-gray-500 py-8">Loading stock records...</p>
+          )}
+
+          {!loading && filtered.length === 0 && (
+            <p className="text-center text-gray-500 py-8">No stock records found.</p>
+          )}
+
+          {!loading && filtered.map((record) => (
+            <div key={record._id} className="border rounded-xl mb-3 overflow-hidden">
+              <button
+                type="button"
+                className="w-full flex justify-between items-center px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left"
+                onClick={() => setExpandedId(expandedId === record._id ? null : record._id)}
+              >
+                <div className="flex gap-6 text-sm">
+                  <span className="font-semibold">{record.brandName}</span>
+                  <span className="text-gray-500">{record.date}</span>
+                  <span className="text-gray-400">{record.items?.length || 0} items</span>
+                </div>
+                <span className="text-gray-400 text-xs">{expandedId === record._id ? "▲" : "▼"}</span>
+              </button>
+
+              {expandedId === record._id && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Item</th>
+                        <th className="px-3 py-2 text-left">UOM</th>
+                        <th className="px-3 py-2 text-right">Issue</th>
+                        <th className="px-3 py-2 text-right">Used</th>
+                        <th className="px-3 py-2 text-right">Wastage</th>
+                        <th className="px-3 py-2 text-right">Remaining</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(record.items || []).map((item, idx) => (
+                        <tr key={idx} className="border-t">
+                          <td className="px-3 py-2">{item.itemName}</td>
+                          <td className="px-3 py-2">{item.uom}</td>
+                          <td className="px-3 py-2 text-right">{item.issueQty}</td>
+                          <td className="px-3 py-2 text-right">{item.usedQty}</td>
+                          <td className="px-3 py-2 text-right">{item.wastageQty}</td>
+                          <td className="px-3 py-2 text-right font-medium">{item.remainingQty}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end p-4 border-t">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- STOCK UPDATE MODAL ---------- */
+function StockUpdateModal({ onClose }) {
+  const emptyItem = { itemName: "", uom: "", issueQty: "", usedQty: "", wastageQty: "", remainingQty: "" };
+
+  const [brandId, setBrandId] = useState("");
+  const [date, setDate] = useState("");
+  const [items, setItems] = useState([{ ...emptyItem }]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const updateItem = (idx, field, value) => {
+    setItems((prev) => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  };
+
+  const addItem = () => setItems((prev) => [...prev, { ...emptyItem }]);
+
+  const removeItem = (idx) => setItems((prev) => prev.filter((_, i) => i !== idx));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (!brandId.trim()) return setError("Brand ID is required.");
+    if (!date) return setError("Date is required.");
+    if (items.length === 0) return setError("Add at least one item.");
+
+    const parsedItems = items.map((it) => ({
+      itemName: it.itemName.trim(),
+      uom: it.uom.trim(),
+      issueQty: Number(it.issueQty),
+      usedQty: Number(it.usedQty),
+      wastageQty: Number(it.wastageQty),
+      remainingQty: Number(it.remainingQty),
+    }));
+
+    const invalid = parsedItems.find(
+      (it) => !it.itemName || !it.uom || [it.issueQty, it.usedQty, it.wastageQty, it.remainingQty].some((n) => isNaN(n) || n < 0)
+    );
+    if (invalid) return setError("All item fields are required and quantities must be ≥ 0.");
+
+    setSubmitting(true);
+    try {
+      await api.post("/api/stock-updates", { brandId: brandId.trim(), date, items: parsedItems });
+      alert("Stock updated successfully");
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to submit stock update.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Stock Update</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex-1 overflow-auto p-6 space-y-5">
+          {error && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Brand ID</label>
+              <input
+                type="text"
+                value={brandId}
+                onChange={(e) => setBrandId(e.target.value)}
+                placeholder="MongoDB ObjectId of brand"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-gray-700">Items</span>
+              <button
+                type="button"
+                onClick={addItem}
+                className="text-sm px-3 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 border"
+              >
+                + Add Item
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {items.map((item, idx) => (
+                <div key={idx} className="border rounded-xl p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-2 items-end">
+                  <div className="col-span-2 md:col-span-1 lg:col-span-2">
+                    <label className="block text-xs text-gray-500 mb-1">Item Name</label>
+                    <input
+                      type="text"
+                      value={item.itemName}
+                      onChange={(e) => updateItem(idx, "itemName", e.target.value)}
+                      placeholder="e.g. Tomato"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">UOM</label>
+                    <input
+                      type="text"
+                      value={item.uom}
+                      onChange={(e) => updateItem(idx, "uom", e.target.value)}
+                      placeholder="KG"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                  {["issueQty", "usedQty", "wastageQty", "remainingQty"].map((field) => (
+                    <div key={field}>
+                      <label className="block text-xs text-gray-500 mb-1 capitalize">
+                        {field.replace("Qty", " Qty")}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={item[field]}
+                        onChange={(e) => updateItem(idx, field, e.target.value)}
+                        placeholder="0"
+                        className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                      />
+                    </div>
+                  ))}
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={() => removeItem(idx)}
+                      disabled={items.length === 1}
+                      className="text-red-500 hover:text-red-700 text-lg disabled:opacity-30"
+                      title="Remove item"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              {submitting ? "Submitting..." : "Submit"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

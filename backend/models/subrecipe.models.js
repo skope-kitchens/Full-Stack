@@ -48,6 +48,10 @@ const subRecipeSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    yield: {
+      type: Number,
+      default: 0,
+    },
     items: {
       type: [recipeItemSchema],
       required: true,

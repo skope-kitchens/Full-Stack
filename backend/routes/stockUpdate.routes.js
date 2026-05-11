@@ -4,6 +4,7 @@ import { requireRole } from "../middleware/requireAdmin.js";
 import {
   upsertStockUpdate,
   listStockUpdatesByBrand,
+  listAllStockUpdates,
 } from "../controllers/stockUpdate.controller.js";
 
 const router = express.Router();
@@ -20,6 +21,13 @@ router.get(
   authMiddleware,
   requireRole("INGREDIENT_MANAGER"),
   listStockUpdatesByBrand
+);
+
+router.get(
+  "/stock-updates/all",
+  authMiddleware,
+  requireRole("INGREDIENT_MANAGER"),
+  listAllStockUpdates
 );
 
 export default router;
