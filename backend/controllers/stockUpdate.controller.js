@@ -1,5 +1,6 @@
 import StockUpdate from "../models/stockUpdate.js";
 import User from "../models/user.js";
+import BrandStock from "../models/brandStock.js";
 
 function normalizeDateOnly(dateStr) {
   const raw = String(dateStr || "").trim();
@@ -52,6 +53,55 @@ export async function upsertStockUpdate(req, res) {
       },
       { upsert: true, new: true }
     ).lean();
+
+    // Sync remainingQty into brand_stocks after stock_update is saved.
+    // Best-effort: failures are logged but never block the response.
+    try {
+      const brandName = String(brand.brandName).trim();
+
+      for (const item of cleaned) {
+        // Match by brandName + itemName only (ingredientBrand is not in stock_updates)
+        const stockDocs = await BrandStock.find(
+          { brandName, itemName: item.itemName },
+          { _id: 1, qtyRemaining: 1, uom: 1 }
+        ).lean();
+
+        if (stockDocs.length === 0) continue;
+
+        if (stockDocs.length > 1) {
+          // Multiple ingredientBrand entries for same item — delta distribution is ambiguous.
+          // Skip rather than risk corrupting individual ledgers.
+          console.warn(`[StockSync] Multiple brand_stocks entries for brand="${brandName}" item="${item.itemName}" — skipping sync`);
+          continue;
+        }
+
+        const stockDoc = stockDocs[0];
+        const previousQty = Number(stockDoc.qtyRemaining || 0);
+        const newQty = Number(item.remainingQty);
+        const delta = newQty - previousQty;
+
+        if (delta === 0) continue;
+
+        await BrandStock.findByIdAndUpdate(
+          stockDoc._id,
+          {
+            $inc: { qtyRemaining: delta },
+            $push: {
+              history: {
+                type: "RECONCILIATION",
+                qty: Math.abs(delta),
+                uom: item.uom || stockDoc.uom || "",
+                note: "Daily stock update sync",
+                at: new Date(),
+              },
+            },
+          }
+        );
+      }
+    } catch (syncErr) {
+      // stock_updates save succeeded — do not fail the response over a sync error.
+      console.error("[StockSync] brand_stocks sync failed:", syncErr?.message || syncErr);
+    }
 
     return res.json({ success: true, data: doc });
 

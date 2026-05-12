@@ -80,6 +80,7 @@ export default function AddRecipe() {
           .filter(Boolean);
         const opts = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
         setTrainingNameOptions(opts);
+        if (opts.length && !recipeName) setRecipeName(opts[0]);
       } catch (e) {
         console.error("Failed to load training recipes", e);
         setTrainingNameOptions([]);
@@ -115,21 +116,24 @@ export default function AddRecipe() {
 
 
   const saveRecipe = async () => {
-  const payload = {
-    brand,
-    recipeName,
-    sopLink: recipeType === "MAIN" ? sopLink : "",
-    items,
+    const payload = {
+      brand,
+      recipeName,
+      sopLink: recipeType === "MAIN" ? sopLink : "",
+      items,
+    };
+
+    try {
+      if (recipeType === "MAIN") {
+        await api.post("/api/mainrecipes", payload);
+      } else {
+        await api.post("/api/subrecipes", payload);
+      }
+      alert("Recipe saved");
+    } catch (err) {
+      alert(err?.response?.data?.message || "Failed to save recipe");
+    }
   };
-
-  if (recipeType === "MAIN") {
-    await api.post("/api/mainrecipes", payload);
-  } else {
-    await api.post("/api/subrecipes", payload);
-  }
-
-  alert("Recipe saved");
-};
 
 
   return (

@@ -126,39 +126,36 @@ export const issueIndentItem = async (req, res) => {
       return res.status(400).json({ message: "Item must be verified before issuing" });
     }
 
+    // Credit brand_stocks BEFORE persisting ISSUED status.
+    // If this fails, the outer catch returns 500 and indent stays INDENT_VERIFIED — safe to retry.
+    const brandName = String(doc.requestBrandName || "").trim();
+    if (brandName) {
+      await BrandStock.findOneAndUpdate(
+        {
+          brandName,
+          itemName: doc.itemName,
+          ingredientBrand: String(doc.ingredientBrand || "").trim(),
+        },
+        {
+          $setOnInsert: { uom: doc.uom || "" },
+          $inc: { qtyRemaining: Number(doc.qty || 0) },
+          $push: {
+            history: {
+              type: "ISSUE",
+              qty: Number(doc.qty || 0),
+              uom: doc.uom || "",
+              at: new Date(),
+            },
+          },
+        },
+        { upsert: true, new: true }
+      );
+    }
+
     doc.status = "ISSUED";
     doc.issuedAt = new Date();
     doc.isSeenByRecipeAdminGrn = false;
     await doc.save();
-
-    // Update Recipe Admin stock ledger (by request brand)
-    try {
-      const brandName = String(doc.requestBrandName || "").trim();
-      if (brandName) {
-        await BrandStock.findOneAndUpdate(
-          {
-            brandName,
-            itemName: doc.itemName,
-            ingredientBrand: String(doc.ingredientBrand || "").trim(),
-          },
-          {
-            $setOnInsert: { uom: doc.uom || "" },
-            $inc: { qtyRemaining: Number(doc.qty || 0) },
-            $push: {
-              history: {
-                type: "ISSUE",
-                qty: Number(doc.qty || 0),
-                uom: doc.uom || "",
-                at: new Date(),
-              },
-            },
-          },
-          { upsert: true, new: true }
-        );
-      }
-    } catch (e) {
-      console.error("Brand stock update failed:", e?.message || e);
-    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -170,10 +167,16 @@ export const issueIndentItem = async (req, res) => {
 export const deleteIndentItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await IngredientIndent.findByIdAndDelete(id);
-    if (!deleted) {
+    const doc = await IngredientIndent.findById(id);
+    if (!doc) {
       return res.status(404).json({ message: "Indent item not found" });
     }
+    if (doc.status === "ISSUED") {
+      return res.status(409).json({
+        message: "Cannot delete an ISSUED indent. It has already credited brand stock. Raise a reversal instead.",
+      });
+    }
+    await doc.deleteOne();
     return res.json({ success: true });
   } catch (err) {
     console.error("Delete indent error:", err?.message || err);

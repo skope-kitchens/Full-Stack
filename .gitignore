@@ -22,3 +22,9 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Graphify generated output
+graphify-out/
+
+# Claude local tooling
+.claude/

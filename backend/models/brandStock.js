@@ -20,7 +20,7 @@ const brandStockSchema = new mongoose.Schema(
     ingredientBrand: { type: String, default: "", trim: true },
     uom: { type: String, default: "" },
     qtyRemaining: { type: Number, default: 0 },
-    status: { type: String, enum: ["Pending", "Used"], default: "Pending", index: true },
+    status: { type: String, enum: ["Pending", "Used", "Archived"], default: "Pending", index: true },
     history: { type: [historySchema], default: [] },
   },
   { timestamps: true }

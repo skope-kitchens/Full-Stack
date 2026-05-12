@@ -120,8 +120,12 @@ export const transferBrandStock = async (req, res) => {
 export const deleteBrandStockItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await BrandStock.findByIdAndDelete(id);
-    if (!deleted) return res.status(404).json({ message: "Stock item not found" });
+    const updated = await BrandStock.findByIdAndUpdate(
+      id,
+      { $set: { status: "Archived" } },
+      { new: true }
+    ).lean();
+    if (!updated) return res.status(404).json({ message: "Stock item not found" });
     return res.json({ success: true });
   } catch (err) {
     console.error("Delete brand stock error:", err?.message || err);
