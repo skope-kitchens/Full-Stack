@@ -1,5 +1,4 @@
 import express from 'express'
-import jwt from 'jsonwebtoken'
 import {
   login,
   signup,
@@ -10,29 +9,6 @@ import {
 import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router()
-
-const createToken = (user) => {
-  const secret = process.env.JWT_SECRET || 'development-secret'
-
-  return jwt.sign(
-    {
-      userId: user._id,
-      brandName: user.brandName,
-    },
-    secret,
-    { expiresIn: '7d' }
-  )
-}
-
-
-
-const sanitizeUser = (user) => ({
-  id: user._id,
-  name: user.name,
-  brandName: user.brandName,
-  email: user.email,
-  address: user.address,
-})
 
 
 router.post('/signup', signup )

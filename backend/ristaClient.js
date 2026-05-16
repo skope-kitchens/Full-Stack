@@ -5,7 +5,7 @@ import crypto from "crypto";
 
 dotenv.config();
 
-const BASE_URL = "https://api.ristaapps.com/v1";
+const BASE_URL = process.env.RISTA_BASE_URL || "https://api.ristaapps.com/v1";
 
 function createRistaToken() {
   return jwt.sign(

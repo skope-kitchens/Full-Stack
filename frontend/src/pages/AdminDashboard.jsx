@@ -5,6 +5,7 @@ import BrandList from "./BrandList";
 import BrandDrawer from "./BrandDrawer";
 import api from "../utils/api";
 import { fetchFoodCost } from "../utils/costingapi";
+import { authUtils } from "../utils/auth";
 
 const AdminDashboard = () => {
   const [selectedBrand, setSelectedBrand] = useState(null);
@@ -26,13 +27,14 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const search = typeof window !== "undefined" ? window.location.search : "";
 
-  const adminRole = typeof window !== "undefined"
-    ? localStorage.getItem("adminRole")
-    : null;
+  // Role is derived from the JWT payload stored in sessionStorage.
+  // This is the same role the backend will decode — guaranteed to be in sync.
+  const adminRole = authUtils.getRole();
 
   const handleLogout = () => {
-    sessionStorage.clear();
-    localStorage.clear();
+    authUtils.clearAuth();
+    localStorage.removeItem("token");
+    localStorage.removeItem("userType");
     navigate("/");
   };
 

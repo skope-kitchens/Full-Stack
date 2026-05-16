@@ -8,6 +8,8 @@ import authRoutes from './routes/auth.routes.js'
 import eligibilityRoutes from './routes/eligibility.routes.js'
 import productsRoute from './routes/products.routes.js'
 import mongoose from 'mongoose'
+import { authMiddleware } from './middleware/auth.js'
+import { requireRole } from './middleware/requireAdmin.js'
 import dashboardRoutes from './routes/dashboard.routes.js'
 import paymentRoutes from './routes/payment.routes.js'
 import adminBrandRoutes from './routes/admin.brand.routes.js'
@@ -125,7 +127,8 @@ app.use("/api", brandStockRoutes);
 app.use("/api", stockUpdateRoutes);
 app.use("/api/google", googleRoutes);
 
-app.get("/debug/db", async (req, res) => {
+// WALLET_MANAGER only — will become SUPER_ADMIN when that role is introduced.
+app.get("/debug/db", authMiddleware, requireRole("WALLET_MANAGER"), async (req, res) => {
   const dbName = mongoose.connection.db.databaseName;
   const collections = await mongoose.connection.db
     .listCollections()

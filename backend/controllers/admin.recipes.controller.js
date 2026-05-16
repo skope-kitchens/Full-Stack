@@ -16,7 +16,7 @@ const calculateCost = ({ quantity, netPrice, uom }) => {
   return qty * price;
 };
 
-async function expandItem({ item, multiplier, level, breakdown, brand }) {
+async function expandItem({ item, multiplier, level, breakdown, brand, visited }) {
   const isSubrecipeChild = level > 0;
   const baseCost = isSubrecipeChild
     ? 0
@@ -33,11 +33,21 @@ async function expandItem({ item, multiplier, level, breakdown, brand }) {
   });
 
   if (item.type === "SUBRECIPE") {
+    const cycleKey = String(item.refId || "").trim().toLowerCase();
+
+    // Circular reference guard — prevents stack overflow on circular BOM graphs.
+    if (visited.has(cycleKey)) {
+      console.warn(`[RecipeExpansion] Circular sub-recipe detected: "${item.refId}" at level ${level} — skipping`);
+      return;
+    }
+
     const subQuery = brand
       ? { recipeName: item.refId, brand }
       : { recipeName: item.refId };
     const sub = await SubRecipe.findOne(subQuery);
     if (!sub) return;
+
+    visited.add(cycleKey);
     for (const child of sub.items) {
       await expandItem({
         item: child,
@@ -45,8 +55,10 @@ async function expandItem({ item, multiplier, level, breakdown, brand }) {
         level: level + 1,
         breakdown,
         brand: brand || sub.brand,
+        visited,
       });
     }
+    visited.delete(cycleKey);
   }
 }
 
@@ -80,6 +92,7 @@ export const getRecipeBreakdown = async (req, res) => {
     }
 
     const breakdown = [];
+    const visited = new Set();
     for (const item of mainRecipe.items) {
       await expandItem({
         item,
@@ -87,6 +100,7 @@ export const getRecipeBreakdown = async (req, res) => {
         level: 0,
         breakdown,
         brand: mainRecipe.brand,
+        visited,
       });
     }
 

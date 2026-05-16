@@ -1,6 +1,7 @@
 import User from "../models/user.js";
 import Vendor from "../models/vendor.js";
 import Consumer from "../models/consumer.js";
+import AdminUser from "../models/adminUser.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -8,14 +9,8 @@ import fetch from "node-fetch";
 import PhoneOtp from "../models/phoneOtp.js";
 import PasswordResetToken from "../models/passwordResetToken.js";
 
-const ADMIN_ROLES = {
-  WALLET_MANAGER: "WALLET_MANAGER",
-  RECIPE_MANAGER: "RECIPE_MANAGER",
-  INGREDIENT_MANAGER: "INGREDIENT_MANAGER"
-};
-
 const createToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET || "development-secret", {
+  return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: "7d"
   });
 };
@@ -390,58 +385,29 @@ export const login = async (req, res) => {
 
     const loginId = email.toLowerCase().trim();
 
-    /* =====================================================
-       ADMIN LOGIN (CHECK FIRST — NO DATABASE)
-    ===================================================== */
+    /* ---------- ADMIN ---------- */
+    const adminUser = await AdminUser.findOne({ email: loginId, isActive: true });
 
-    const adminConfigs = [
-      {
-        role: ADMIN_ROLES.WALLET_MANAGER,
-        username: process.env.ADMIN_WALLET_USERNAME,
-        password: process.env.ADMIN_WALLET_PASSWORD
-      },
-      {
-        role: ADMIN_ROLES.RECIPE_MANAGER,
-        username: process.env.ADMIN_RECIPE_USERNAME,
-        password: process.env.ADMIN_RECIPE_PASSWORD
-      },
-      {
-        role: ADMIN_ROLES.INGREDIENT_MANAGER,
-        username: process.env.ADMIN_INGREDIENT_USERNAME,
-        password: process.env.ADMIN_INGREDIENT_PASSWORD
+    if (adminUser) {
+      const passwordMatch = await bcrypt.compare(password, adminUser.passwordHash);
+
+      if (passwordMatch) {
+        const token = createToken({
+          adminId: adminUser._id,
+          role: adminUser.role,
+          admin: true,
+        });
+        return res.json({
+          userType: "admin",
+          token,
+          role: adminUser.role,
+          name: adminUser.name,
+        });
       }
-    ];
 
-    const matchedAdmin = adminConfigs.find((admin) => {
-      if (!admin.username || !admin.password) return false;
-
-      const envUser = admin.username.toLowerCase().trim();
-      const envId = envUser.includes("@") ? envUser.split("@")[0] : envUser;
-
-      const input = loginId.toLowerCase().trim();
-
-      return (
-        (input === envUser || input === envId) &&
-        password === admin.password
-      );
-    });
-
-    if (matchedAdmin) {
-      const token = createToken({
-        role: matchedAdmin.role,
-        admin: true
-      });
-
-      return res.json({
-        userType: "admin",
-        token,
-        role: matchedAdmin.role
-      });
+      // Admin email found but password wrong — fail immediately, don't fall through.
+      return res.status(401).json({ message: "Invalid email or password" });
     }
-
-    /* =====================================================
-       DATABASE USERS (NOW SAFE)
-    ===================================================== */
 
     const normalizedEmail = email.toLowerCase();
 

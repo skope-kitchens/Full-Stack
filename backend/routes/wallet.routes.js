@@ -253,30 +253,34 @@ router.post("/pay", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: "Invalid amount" });
     }
 
-    const user = await User.findById(userId);
+    // Atomic check-and-deduct: the balance filter and the $inc execute as one MongoDB operation.
+    // This prevents TOCTOU double-spend: two concurrent requests for the same user can only
+    // both succeed if the balance can cover both independently.
+    const user = await User.findOneAndUpdate(
+      {
+        _id: userId,
+        "wallet.balance": { $gte: payAmount },
+      },
+      {
+        $inc: { "wallet.balance": -payAmount },
+        $push: {
+          "wallet.transactions": {
+            type: "debit",
+            amount: payAmount,
+            source: "admin",
+            reason: "ORDER_PAYMENT",
+          },
+        },
+      },
+      { new: true }
+    );
+
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    if (!user.wallet) {
-      user.wallet = { balance: 0, transactions: [] };
-    }
-
-    if (user.wallet.balance < payAmount) {
+      // findOneAndUpdate returned null — either user doesn't exist or balance insufficient.
+      const exists = await User.exists({ _id: userId });
+      if (!exists) return res.status(404).json({ message: "User not found" });
       return res.status(400).json({ message: "Insufficient wallet balance" });
     }
-
-    /* ================= WALLET DEDUCTION ================= */
-    user.wallet.balance -= payAmount;
-
-    user.wallet.transactions.push({
-      type: "debit",
-      amount: payAmount,
-      source: "admin", // MUST match enum
-      reason: "ORDER_PAYMENT"
-    });
-
-    await user.save();
 
     /* ================= CREATE ORDER ================= */
     /* ================= NORMALIZE ITEMS FROM BREAKDOWN ================= */

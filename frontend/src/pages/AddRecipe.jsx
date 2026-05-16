@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../utils/api.js";
 import RecipeItem from "../components/RecipeItem.jsx";
+import { authUtils } from "../utils/auth.js";
 
 const EMPTY_NODE = () => ({
   type: "INGREDIENT", // INGREDIENT | SUBRECIPE
@@ -29,10 +30,11 @@ export default function AddRecipe() {
   const [subRecipes, setSubRecipes] = useState([]);
   const navigate = useNavigate();
 
-  // Frontend guard: only RECIPE_MANAGER admins should access this page
+  // Frontend guard: only RECIPE_MANAGER admins should access this page.
+  // Role read from JWT via authUtils.getRole() — single source of truth.
   useEffect(() => {
     const userType = localStorage.getItem("userType");
-    const adminRole = localStorage.getItem("adminRole");
+    const adminRole = authUtils.getRole();
     if (userType === "admin" && adminRole !== "RECIPE_MANAGER") {
       navigate("/admin-dashboard");
     }

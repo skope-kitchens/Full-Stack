@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../utils/api.js";
 import RecipeItem from "../components/RecipeItem.jsx";
+import { authUtils } from "../utils/auth.js";
 
 const EMPTY_NODE = () => ({
   type: "INGREDIENT",
@@ -29,7 +30,7 @@ export default function AddTrainingRecipe() {
 
   useEffect(() => {
     const userType = localStorage.getItem("userType");
-    const adminRole = localStorage.getItem("adminRole");
+    const adminRole = authUtils.getRole();
     if (userType === "admin" && adminRole !== "RECIPE_MANAGER") {
       navigate("/admin-dashboard");
     }

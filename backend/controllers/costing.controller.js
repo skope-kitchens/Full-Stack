@@ -50,9 +50,9 @@ export const calculateFoodCost = async (req, res) => {
   let foodCost = 0;
   let packagingCost = 0;
 
-  const subRecipeCache = new Map(); // key: recipeNameLower -> SubRecipe doc (lean)
+  const subRecipeCache = new Map();
+  const visitedSubRecipes = new Set();
 
-  // 🔁 expand items recursively
   for (const item of mainRecipe.items) {
     await expandItem({
       item,
@@ -61,6 +61,7 @@ export const calculateFoodCost = async (req, res) => {
       breakdown,
       brandName: userBrandName,
       subRecipeCache,
+      visitedSubRecipes,
     });
   }
 
@@ -100,10 +101,10 @@ async function expandItem({
   breakdown,
   brandName,
   subRecipeCache,
+  visitedSubRecipes,
 }) {
   const category = normalizeCategory(item.category);
 
-  // For ingredients: use normal cost
   if (item.type !== "SUBRECIPE") {
     const cost = calculateCost(item) * multiplier;
     breakdown.push({
@@ -118,10 +119,25 @@ async function expandItem({
     return;
   }
 
-  // For subrecipes:
-  // - show the child ingredient costs for display
-  // - but totals must not double-count children; totals are calculated using only level === 0 rows
-  const explicitCost = calculateCost(item) * multiplier; // if main recipe stored a subrecipe cost explicitly
+  const cycleKey = String(item.refId || "").trim().toLowerCase();
+
+  // Circular reference guard — prevents infinite recursion on circular BOM graphs.
+  if (visitedSubRecipes.has(cycleKey)) {
+    console.warn(`[CostingEngine] Circular sub-recipe detected: "${item.refId}" at level ${level} — skipping`);
+    breakdown.push({
+      item: item.refId,
+      type: item.type,
+      category,
+      qty: item.quantity,
+      uom: item.uom,
+      cost: 0,
+      level,
+      warning: "CIRCULAR_REF_SKIPPED",
+    });
+    return;
+  }
+
+  const explicitCost = calculateCost(item) * multiplier;
 
   const sub = await resolveSubRecipe({
     recipeName: item.refId,
@@ -131,12 +147,15 @@ async function expandItem({
 
   let computedCost = 0;
   if (sub) {
+    visitedSubRecipes.add(cycleKey);
     computedCost = await sumSubRecipeCost({
       items: sub.items,
       brandName,
       multiplier,
       subRecipeCache,
+      visitedSubRecipes,
     });
+    visitedSubRecipes.delete(cycleKey);
   }
 
   const subCost = explicitCost > 0 ? explicitCost : computedCost;
@@ -151,8 +170,9 @@ async function expandItem({
     level,
   });
 
-  // Expand children for display (with real costs)
   if (!sub) return;
+
+  visitedSubRecipes.add(cycleKey);
   for (const child of sub.items) {
     await expandItem({
       item: child,
@@ -161,8 +181,10 @@ async function expandItem({
       breakdown,
       brandName,
       subRecipeCache,
+      visitedSubRecipes,
     });
   }
+  visitedSubRecipes.delete(cycleKey);
 }
 
 /* ================= HELPERS ================= */
@@ -194,10 +216,15 @@ async function resolveSubRecipe({ recipeName, brandName, cache }) {
   return match;
 }
 
-async function sumSubRecipeCost({ items, brandName, multiplier, subRecipeCache }) {
+async function sumSubRecipeCost({ items, brandName, multiplier, subRecipeCache, visitedSubRecipes }) {
   let sum = 0;
   for (const it of items || []) {
     if (it.type === "SUBRECIPE") {
+      const cycleKey = String(it.refId || "").trim().toLowerCase();
+      if (visitedSubRecipes.has(cycleKey)) {
+        console.warn(`[CostingEngine] Circular sub-recipe in cost sum: "${it.refId}" — skipping`);
+        continue;
+      }
       const sub = await resolveSubRecipe({
         recipeName: it.refId,
         brandName,
@@ -205,12 +232,15 @@ async function sumSubRecipeCost({ items, brandName, multiplier, subRecipeCache }
       });
       if (!sub) continue;
       const explicit = calculateCost(it) * multiplier;
+      visitedSubRecipes.add(cycleKey);
       const nested = await sumSubRecipeCost({
         items: sub.items,
         brandName,
         multiplier,
         subRecipeCache,
+        visitedSubRecipes,
       });
+      visitedSubRecipes.delete(cycleKey);
       sum += explicit > 0 ? explicit : nested;
     } else {
       sum += calculateCost(it) * multiplier;
@@ -254,6 +284,7 @@ async function calculateRecipe(recipeId) {
 
   let breakdown = [];
   const subRecipeCache = new Map();
+  const visitedSubRecipes = new Set();
 
   for (const item of mainRecipe.items) {
     await expandItem({
@@ -263,6 +294,7 @@ async function calculateRecipe(recipeId) {
       breakdown,
       brandName: mainRecipe.brand,
       subRecipeCache,
+      visitedSubRecipes,
     });
   }
 

@@ -119,45 +119,71 @@ export const verifyIndentItem = async (req, res) => {
 export const issueIndentItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const doc = await IngredientIndent.findById(id);
-    if (!doc) return res.status(404).json({ message: "Indent item not found" });
 
-    if (doc.status !== "INDENT_VERIFIED") {
+    // Atomic claim: only one concurrent request can transition INDENT_VERIFIED → INDENT_ISSUING.
+    // If two requests arrive simultaneously, only one wins this findOneAndUpdate; the other
+    // sees null and returns the appropriate error — preventing double brand_stocks credit.
+    const doc = await IngredientIndent.findOneAndUpdate(
+      { _id: id, status: "INDENT_VERIFIED" },
+      { $set: { status: "INDENT_ISSUING" } },
+      { new: true }
+    );
+
+    if (!doc) {
+      // Distinguish between "not found" and "wrong status" for accurate error messaging.
+      const existing = await IngredientIndent.findById(id).select("status").lean();
+      if (!existing) return res.status(404).json({ message: "Indent item not found" });
+      if (existing.status === "ISSUED") return res.status(400).json({ message: "Already issued" });
+      if (existing.status === "INDENT_ISSUING") return res.status(400).json({ message: "Issue already in progress — retry in a moment" });
       return res.status(400).json({ message: "Item must be verified before issuing" });
     }
 
-    // Credit brand_stocks BEFORE persisting ISSUED status.
-    // If this fails, the outer catch returns 500 and indent stays INDENT_VERIFIED — safe to retry.
-    const brandName = String(doc.requestBrandName || "").trim();
-    if (brandName) {
-      await BrandStock.findOneAndUpdate(
-        {
-          brandName,
-          itemName: doc.itemName,
-          ingredientBrand: String(doc.ingredientBrand || "").trim(),
-        },
-        {
-          $setOnInsert: { uom: doc.uom || "" },
-          $inc: { qtyRemaining: Number(doc.qty || 0) },
-          $push: {
-            history: {
-              type: "ISSUE",
-              qty: Number(doc.qty || 0),
-              uom: doc.uom || "",
-              at: new Date(),
+    try {
+      // Credit brand_stocks. If this throws, the catch below resets status to INDENT_VERIFIED
+      // so the indent remains retryable. The INDENT_ISSUING claim is released on failure.
+      const brandName = String(doc.requestBrandName || "").trim();
+      if (brandName) {
+        await BrandStock.findOneAndUpdate(
+          {
+            brandName,
+            itemName: doc.itemName,
+            ingredientBrand: String(doc.ingredientBrand || "").trim(),
+          },
+          {
+            $setOnInsert: { uom: doc.uom || "", ownedBy: brandName, location: "BRANCH_KITCHEN", branchCode: "JP_NAGAR" },
+            $inc: { qtyRemaining: Number(doc.qty || 0) },
+            $push: {
+              history: {
+                type: "ISSUE",
+                qty: Number(doc.qty || 0),
+                uom: doc.uom || "",
+                at: new Date(),
+                referenceId: doc._id,
+                referenceKind: "INDENT",
+                actorRole: "INGREDIENT_MANAGER",
+              },
             },
           },
+          { upsert: true, new: true }
+        );
+      }
+
+      // Credit succeeded — now persist ISSUED status.
+      await IngredientIndent.findByIdAndUpdate(id, {
+        $set: {
+          status: "ISSUED",
+          issuedAt: new Date(),
+          isSeenByRecipeAdminGrn: false,
         },
-        { upsert: true, new: true }
-      );
+      });
+
+      return res.json({ success: true });
+    } catch (creditErr) {
+      // Credit failed — release the INDENT_ISSUING lock so the indent can be retried.
+      console.error("Issue indent credit error (resetting to INDENT_VERIFIED):", creditErr?.message || creditErr);
+      await IngredientIndent.findByIdAndUpdate(id, { $set: { status: "INDENT_VERIFIED" } });
+      return res.status(500).json({ message: "Failed to issue indent item — please retry" });
     }
-
-    doc.status = "ISSUED";
-    doc.issuedAt = new Date();
-    doc.isSeenByRecipeAdminGrn = false;
-    await doc.save();
-
-    return res.json({ success: true });
   } catch (err) {
     console.error("Issue indent error:", err?.message || err);
     return res.status(500).json({ message: "Failed to issue indent item" });

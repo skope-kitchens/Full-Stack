@@ -19,9 +19,15 @@ export const authMiddleware = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 🔐 ADMIN (ROLE-BASED, NO DB LOOKUP)
+    // ADMIN — role-based, no DB lookup required.
+    // decoded.adminId is present on tokens issued after seedAdminUsers.js migration.
+    // For legacy tokens (issued before migration), adminId is undefined — _id is null.
     if (decoded.role && ADMIN_ROLES.has(decoded.role)) {
-      req.user = { role: decoded.role };
+      req.user = {
+        _id: decoded.adminId || null,
+        role: decoded.role,
+        admin: true,
+      };
       return next();
     }
 

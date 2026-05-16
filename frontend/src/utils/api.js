@@ -5,29 +5,36 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "https://full-stack-8ug9.onrender.com",
 });
 
-// Safe storage getter
+/**
+ * Token resolution order:
+ *   1. sessionStorage["skope_auth_token"] — primary, written by authUtils.setAuth()
+ *   2. localStorage["token"] — fallback for sessions started before the auth migration
+ *
+ * Note: localStorage["skope_auth_token"] is no longer written by the app.
+ * The fallback to localStorage["token"] handles old sessions during the transition
+ * period. It can be removed once all active sessions have been refreshed post-deploy.
+ */
 function safeGetToken() {
   try {
-    const s = sessionStorage.getItem("skope_auth_token")
-    if (s) return s
+    const fromSession = sessionStorage.getItem("skope_auth_token");
+    if (fromSession) return fromSession;
   } catch {}
 
   try {
-    const l = localStorage.getItem("skope_auth_token") || localStorage.getItem("token")
-    if (l) return l
+    const fromLocal = localStorage.getItem("token");
+    if (fromLocal) return fromLocal;
   } catch {}
 
-  return null
+  return null;
 }
-
 
 // Attach token automatically to every request
 api.interceptors.request.use((config) => {
-  const token = safeGetToken()
+  const token = safeGetToken();
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+    config.headers.Authorization = `Bearer ${token}`;
   }
-  return config
+  return config;
 })
 /* ---------- INVENTORY (Ingredients source) ---------- */
 export const fetchInventoryItems = (branchCode) =>

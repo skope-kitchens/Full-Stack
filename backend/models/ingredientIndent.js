@@ -24,7 +24,11 @@ const indentSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["INDENT_PENDING", "INDENT_VERIFIED", "ISSUED"],
+      // INDENT_ISSUING is a transient lock state — set atomically before brand_stocks credit fires.
+      // Prevents concurrent issue requests from double-crediting the same indent.
+      // A document stuck in INDENT_ISSUING after a server crash requires manual reset via
+      // PATCH /api/ingredient-indent/:id/reset (INGREDIENT_MANAGER only) — to be built in Day 2.
+      enum: ["INDENT_PENDING", "INDENT_VERIFIED", "INDENT_ISSUING", "ISSUED"],
       default: "INDENT_PENDING",
       index: true,
     },

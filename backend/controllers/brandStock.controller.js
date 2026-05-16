@@ -120,11 +120,30 @@ export const transferBrandStock = async (req, res) => {
 export const deleteBrandStockItem = async (req, res) => {
   try {
     const { id } = req.params;
+    const actorRole = req.user?.role || "";
+
+    const current = await BrandStock.findById(id).lean();
+    if (!current) return res.status(404).json({ message: "Stock item not found" });
+
     const updated = await BrandStock.findByIdAndUpdate(
       id,
-      { $set: { status: "Archived" } },
+      {
+        $set: { status: "Archived" },
+        $push: {
+          history: {
+            type: "MARK_ARCHIVED",
+            qty: Number(current.qtyRemaining || 0),
+            uom: current.uom || "",
+            previousQty: Number(current.qtyRemaining || 0),
+            at: new Date(),
+            actorRole,
+            note: "Item archived",
+          },
+        },
+      },
       { new: true }
     ).lean();
+
     if (!updated) return res.status(404).json({ message: "Stock item not found" });
     return res.json({ success: true });
   } catch (err) {
@@ -136,11 +155,45 @@ export const deleteBrandStockItem = async (req, res) => {
 export const markBrandStockUsed = async (req, res) => {
   try {
     const { id } = req.params;
+    const actorRole = req.user?.role || "";
+
+    // Read current state before mutating — needed for previousQty in history entry
+    // and for the state guard (only Pending items can be marked Used).
+    const current = await BrandStock.findById(id).lean();
+    if (!current) return res.status(404).json({ message: "Stock item not found" });
+
+    if (current.status !== "Pending") {
+      return res.status(409).json({
+        message: `Cannot mark as Used: item is currently "${current.status}". Only Pending items can be marked Used.`,
+      });
+    }
+
+    if (Number(current.qtyRemaining || 0) > 0) {
+      // Warn but do not block — ops may intentionally mark an item Used with remaining stock
+      // (e.g., expired, recalled). The history entry documents the remaining quantity.
+      console.warn(`[BrandStock] markBrandStockUsed: item ${id} has qtyRemaining=${current.qtyRemaining}. Marking Used with non-zero quantity.`);
+    }
+
     const updated = await BrandStock.findByIdAndUpdate(
       id,
-      { $set: { status: "Used" } },
+      {
+        $set: { status: "Used" },
+        $push: {
+          history: {
+            type: "MARK_USED",
+            qty: Number(current.qtyRemaining || 0),
+            uom: current.uom || "",
+            previousQty: Number(current.qtyRemaining || 0),
+            newQty: Number(current.qtyRemaining || 0),
+            at: new Date(),
+            actorRole,
+            note: "Item marked as Used",
+          },
+        },
+      },
       { new: true }
     ).lean();
+
     if (!updated) return res.status(404).json({ message: "Stock item not found" });
     return res.json({ success: true, data: updated });
   } catch (err) {

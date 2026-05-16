@@ -36,23 +36,15 @@ const Login = () => {
         password: formData.password
       })
 
+      // Primary auth storage: token + role decoded from JWT.
+      // Role is derived from the JWT itself — no separate adminRole storage needed.
+      authUtils.setAuth(data.token, data.userType);
+
+      // Keep localStorage["token"] for the api.js interceptor fallback.
       localStorage.setItem("token", data.token);
-      localStorage.setItem("adminRole", data.role);
-
-      // save token + profile
-      authUtils.setAuth(data.token);
-
-      // 🔑 SAVE USER TYPE (client / vendor / admin)
       localStorage.setItem("userType", data.userType);
 
-      // 🔑 SAVE ADMIN ROLE (for role-based dashboard), if present
-      if (data.userType === "admin" && data.role) {
-        localStorage.setItem("adminRole", data.role);
-      } else {
-        localStorage.removeItem("adminRole");
-      }
-
-      // ✅ ONLY save user object if it exists (NOT for admin)
+      // Save user/vendor profile object when present (not applicable for admins).
       if (data.user || data.vendor) {
         sessionStorage.setItem(
           "skope_user",

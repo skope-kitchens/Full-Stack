@@ -12,28 +12,29 @@ import {
 
 const router = express.Router();
 
-router.get("/brand-stock", authMiddleware, requireRole("RECIPE_MANAGER"), listBrandStock);
+// READ — RECIPE_MANAGER and INGREDIENT_MANAGER can both view brand stock
+router.get("/brand-stock", authMiddleware, requireRole("RECIPE_MANAGER", "INGREDIENT_MANAGER"), listBrandStock);
 router.get(
   "/brand-stock/all",
   authMiddleware,
-  requireRole("RECIPE_MANAGER"),
+  requireRole("RECIPE_MANAGER", "INGREDIENT_MANAGER"),
   listAllBrandStock
 );
-router.post("/brand-stock/transfer", authMiddleware, requireRole("RECIPE_MANAGER"), transferBrandStock);
+
+// MUTATIONS — INGREDIENT_MANAGER only (irreversible ledger writes)
+router.post("/brand-stock/transfer", authMiddleware, requireRole("INGREDIENT_MANAGER"), transferBrandStock);
 router.delete(
   "/brand-stock/:id",
   authMiddleware,
-  requireRole("RECIPE_MANAGER"),
+  requireRole("INGREDIENT_MANAGER"),
   deleteBrandStockItem
 );
-
 router.patch(
   "/brand-stock/:id/used",
   authMiddleware,
-  requireRole("RECIPE_MANAGER"),
+  requireRole("INGREDIENT_MANAGER"),
   markBrandStockUsed
 );
-
 router.patch(
   "/brand-stock/:id/reconcile",
   authMiddleware,

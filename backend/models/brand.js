@@ -15,6 +15,22 @@ const BrandSchema = new mongoose.Schema(
 
     // ✅ Chef mapping (Contact Us)
     chefName: { type: String, default: '' },
+
+    // ── ERP Inventory Classification ──────────────────────────────────────────
+    // Whether this brand's stock is managed through Skope ERP procurement flows.
+    // false = Category A (kitchen-only). true = Category B/C (procurement support or own brand).
+    // Automatic production deduction only fires when inventoryManaged = true.
+    inventoryManaged: { type: Boolean, default: false },
+
+    // SELF = brand procures independently.
+    // SKOPE = Skope procures on their behalf.
+    // HYBRID = partial (e.g., weekly Skope support + self-procure gaps).
+    procurementModel: {
+      type: String,
+      enum: ["SELF", "SKOPE", "HYBRID"],
+      default: "SELF",
+    },
+    // ──────────────────────────────────────────────────────────────────────────
   },
   { timestamps: true }
 );
