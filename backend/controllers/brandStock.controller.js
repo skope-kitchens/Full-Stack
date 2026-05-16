@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import BrandStock from "../models/brandStock.js";
 
 export const listBrandStock = async (req, res) => {
@@ -37,24 +38,43 @@ export const listAllBrandStock = async (req, res) => {
 
 export const transferBrandStock = async (req, res) => {
   try {
-    const { fromBrandName, toBrandName, itemName, ingredientBrand, qty, uom } = req.body || {};
-    const from = String(fromBrandName || "").trim();
-    const to = String(toBrandName || "").trim();
-    const item = String(itemName || "").trim();
-    const ingBrand = String(ingredientBrand || "").trim();
-    const quantity = Number(qty);
-    const unit = String(uom || "").trim();
+  const { fromBrandName, toBrandName, itemName, ingredientBrand, qty, uom } = req.body || {};
+  const from = String(fromBrandName || "").trim();
+  const to = String(toBrandName || "").trim();
+  const item = String(itemName || "").trim();
+  const ingBrand = String(ingredientBrand || "").trim();
+  const quantity = Number(qty);
+  const unit = String(uom || "").trim();
 
-    if (!from || !to || !item || !Number.isFinite(quantity) || quantity <= 0) {
-      return res.status(400).json({ message: "fromBrandName, toBrandName, itemName, qty are required" });
-    }
-    if (from === to) {
-      return res.status(400).json({ message: "fromBrandName and toBrandName must be different" });
-    }
+  if (!from || !to || !item || !Number.isFinite(quantity) || quantity <= 0) {
+    return res.status(400).json({ message: "fromBrandName, toBrandName, itemName, qty are required" });
+  }
+  if (from === to) {
+    return res.status(400).json({ message: "fromBrandName and toBrandName must be different" });
+  }
 
-    // Atomic check-and-decrement: filter enforces status + sufficient qty in one operation.
-    // Prevents double-spend: two concurrent requests both pass the filter only if qtyRemaining
-    // can cover both — MongoDB applies the filter and $inc atomically at the document level.
+  // Pre-flight read outside session — produces a clear error before acquiring the session lock.
+  const preCheck = await BrandStock.findOne(
+    { brandName: from, itemName: item, ingredientBrand: ingBrand },
+    { status: 1, qtyRemaining: 1 }
+  ).lean();
+
+  if (!preCheck) {
+    return res.status(400).json({ message: "Insufficient stock to transfer" });
+  }
+  if (String(preCheck.status || "Pending") !== "Pending") {
+    return res.status(400).json({ message: "This ingredient is marked Used and cannot be transferred" });
+  }
+  if (Number(preCheck.qtyRemaining || 0) < quantity) {
+    return res.status(400).json({ message: "Insufficient stock to transfer" });
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+
+    // Atomic check-and-decrement inside the transaction.
+    // The balance filter re-checks qty within the session to guard against concurrent transfers.
     const fromDoc = await BrandStock.findOneAndUpdate(
       {
         brandName: from,
@@ -76,25 +96,26 @@ export const transferBrandStock = async (req, res) => {
           },
         },
       },
-      { new: true }
+      { new: true, session }
     );
 
     if (!fromDoc) {
-      // Diagnostic read to preserve original specific error messages.
-      const existing = await BrandStock.findOne(
-        { brandName: from, itemName: item, ingredientBrand: ingBrand },
-        { status: 1, qtyRemaining: 1 }
-      ).lean();
-      if (existing && String(existing.status || "Pending") !== "Pending") {
-        return res.status(400).json({ message: "This ingredient is marked Used and cannot be transferred" });
-      }
+      await session.abortTransaction();
       return res.status(400).json({ message: "Insufficient stock to transfer" });
     }
 
+    // Destination credit — atomic with source debit inside the same transaction.
+    // If this throws, the transaction aborts and the source debit is rolled back.
     const toDoc = await BrandStock.findOneAndUpdate(
       { brandName: to, itemName: item, ingredientBrand: ingBrand },
       {
-        $setOnInsert: { uom: unit || fromDoc.uom, status: "Pending" },
+        $setOnInsert: {
+          uom: unit || fromDoc.uom,
+          status: "Pending",
+          ownedBy: to,
+          location: fromDoc.location || "BRANCH_KITCHEN",
+          branchCode: fromDoc.branchCode || "JP_NAGAR",
+        },
         $inc: { qtyRemaining: quantity },
         $push: {
           history: {
@@ -107,11 +128,20 @@ export const transferBrandStock = async (req, res) => {
           },
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true, session }
     ).lean();
 
+    await session.commitTransaction();
     return res.json({ success: true, data: { from: fromDoc, to: toDoc } });
   } catch (err) {
+    await session.abortTransaction();
+    console.error("Transfer brand stock error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to transfer stock" });
+  } finally {
+    session.endSession();
+  }
+  } catch (err) {
+    // Outer catch — covers pre-flight read and startSession() failures (MongoDB unavailable etc.)
     console.error("Transfer brand stock error:", err?.message || err);
     return res.status(500).json({ message: "Failed to transfer stock" });
   }

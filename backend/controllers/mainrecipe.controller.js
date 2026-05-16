@@ -71,8 +71,6 @@ export const createMainRecipe = async (req, res) => {
       items,
     });
 
-    console.log("MAIN RECIPE SAVED:", recipe._id);
-
     res.status(201).json({
       message: "Main recipe saved successfully",
       data: recipe,

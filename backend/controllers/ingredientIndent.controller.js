@@ -150,7 +150,7 @@ export const issueIndentItem = async (req, res) => {
             ingredientBrand: String(doc.ingredientBrand || "").trim(),
           },
           {
-            $setOnInsert: { uom: doc.uom || "", ownedBy: brandName, location: "BRANCH_KITCHEN", branchCode: "JP_NAGAR" },
+            $setOnInsert: { uom: doc.uom || "", ownedBy: brandName, location: "BRANCH_KITCHEN", branchCode: String(doc.branchCode || "JP_NAGAR").trim() },
             $inc: { qtyRemaining: Number(doc.qty || 0) },
             $push: {
               history: {
@@ -187,6 +187,76 @@ export const issueIndentItem = async (req, res) => {
   } catch (err) {
     console.error("Issue indent error:", err?.message || err);
     return res.status(500).json({ message: "Failed to issue indent item" });
+  }
+};
+
+export const resetStuckIndent = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Step 1: Read the stuck document without modifying it.
+    // We need its data (requestBrandName, itemName, ingredientBrand) to query brand_stocks.
+    const stuck = await IngredientIndent.findOne(
+      { _id: id, status: "INDENT_ISSUING" }
+    ).lean();
+
+    if (!stuck) {
+      const existing = await IngredientIndent.findById(id).select("status").lean();
+      if (!existing) return res.status(404).json({ message: "Indent item not found" });
+      return res.status(409).json({
+        message: `Cannot reset: item is in status "${existing.status}". Only INDENT_ISSUING items can be reset.`,
+      });
+    }
+
+    // Step 2: Check whether the brand_stocks credit actually landed before the crash.
+    // Uses $elemMatch so both conditions must be satisfied by the SAME history entry —
+    // prevents false positives from independent array elements matching separately.
+    const creditAlreadyLanded = await BrandStock.exists({
+      brandName: String(stuck.requestBrandName || "").trim(),
+      itemName: stuck.itemName,
+      history: {
+        $elemMatch: {
+          referenceId: stuck._id,
+          referenceKind: "INDENT",
+        },
+      },
+    });
+
+    const targetStatus = creditAlreadyLanded ? "ISSUED" : "INDENT_VERIFIED";
+
+    // Step 3: Atomic transition — the status filter ensures only one concurrent reset
+    // can write the final status. If two reset requests reach this point simultaneously,
+    // only one findOneAndUpdate wins; the second returns null and the caller gets a 409.
+    const resolved = await IngredientIndent.findOneAndUpdate(
+      { _id: id, status: "INDENT_ISSUING" },
+      {
+        $set: {
+          status: targetStatus,
+          ...(creditAlreadyLanded && {
+            issuedAt: stuck.issuedAt || new Date(),
+            isSeenByRecipeAdminGrn: false,
+          }),
+        },
+      },
+      { new: true }
+    );
+
+    if (!resolved) {
+      // Another concurrent reset won between Step 1 and Step 3 — not an error.
+      return res.status(409).json({ message: "Reset was already completed by a concurrent request." });
+    }
+
+    return res.json({
+      success: true,
+      resolvedTo: targetStatus,
+      creditAlreadyLanded: !!creditAlreadyLanded,
+      message: creditAlreadyLanded
+        ? "Stock credit was already applied — indent marked ISSUED."
+        : "Stock credit had not yet applied — indent reverted to INDENT_VERIFIED for retry.",
+    });
+  } catch (err) {
+    console.error("Reset stuck indent error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to reset indent" });
   }
 };
 

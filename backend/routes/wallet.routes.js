@@ -164,8 +164,6 @@ router.post("/verify", authMiddleware, async (req, res) => {
 
     await user.save();
 
-    console.log("Wallet updated. Sending email…");
-
     await sendWalletTransactionEmail({
       to: user.email,
       amount: paidTotal,
@@ -175,8 +173,6 @@ router.post("/verify", authMiddleware, async (req, res) => {
       balance: user.wallet.balance,
       brandName: user.brandName
     });
-
-    console.log("Email sent.");
 
     res.json({ success: true, balance: user.wallet.balance });
 
@@ -347,14 +343,6 @@ router.post("/pay", authMiddleware, async (req, res) => {
 
 
 
-normalizedItems.forEach((item, i) => {
-  
-  if (item.breakdown)
-    item.breakdown.forEach((b, j) =>
-      console.log("  row", j, typeof b, b)
-    );
-});
-console.log("================================");
 const order = await Order.create({
   brand: user._id,
   items: normalizedItems,
@@ -465,12 +453,6 @@ const order = await Order.create({
             minPackByNameKey.set(key, Number(doc.minPackQty || 0));
           });
 
-          console.log("==== [InventoryLedger] Update Start ====");
-          console.log(
-            "[InventoryLedger] requiredByIngredient:",
-            [...requiredByIngredient.entries()]
-          );
-
           for (const [nameKey, agg] of requiredByIngredient.entries()) {
             const itemDoc = byNameKey.get(nameKey);
             if (!itemDoc) {
@@ -519,19 +501,6 @@ const order = await Order.create({
               );
             }
 
-            console.log("[InventoryLedger] ingredient update:", {
-              ingredientName: agg.ingredientName,
-              requiredQty,
-              availableQty,
-              minPackQty,
-              stockUsed,
-              netRequired,
-              packets,
-              procureQty,
-              leftoverAfterPurchase,
-              finalInventory,
-            });
-
             await KitchenInventory.updateOne(
               { clientId: user._id, ingredientId },
               { $set: { availableQty: finalInventory }, $setOnInsert: { clientId: user._id, ingredientId } },
@@ -570,13 +539,9 @@ const order = await Order.create({
     });
 
   } catch (err) {
-  console.log("====== REAL ERROR START ======");
-  console.log(err);
-  console.log(err.message);
-  console.log(err.errors);
-  console.log("====== REAL ERROR END ======");
-  res.status(500).json({ message: err.message });
-}
+    console.error("Wallet pay error:", err?.message || err);
+    res.status(500).json({ message: "Payment failed" });
+  }
 
 function escapeRegex(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

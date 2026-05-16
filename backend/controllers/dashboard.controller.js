@@ -41,8 +41,6 @@ const computeKPTMinutes = (sales) => {
 // -----------------------------
 export const getDashboardStats = async (req, res) => {
   try {
-    console.log("[DASHBOARD] stats controller called");
-
     const brand = req.brand; // from auth middleware
 
     if (!brand) {
@@ -56,8 +54,6 @@ export const getDashboardStats = async (req, res) => {
       brand.analyticsPeriod ||
       req.query.period ||
       new Date().toISOString().slice(0, 10);
-
-    console.log("[DASHBOARD] using filters:", { branch, period });
 
     if (!branch || !period) {
       return res.json({

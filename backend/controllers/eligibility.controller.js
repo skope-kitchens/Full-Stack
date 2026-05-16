@@ -18,8 +18,6 @@ function toArray(value) {
 
 export const submitEligibility = async (req, res) => {
   try {
-    console.log("Incoming eligibility request");
-
     let attachmentLinks = [];
 
     // ---------- FILE UPLOAD ----------
