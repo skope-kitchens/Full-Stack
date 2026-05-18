@@ -46,18 +46,24 @@ export const transferBrandStock = async (req, res) => {
   const quantity = Number(qty);
   const unit = String(uom || "").trim();
 
-  if (!from || !to || !item || !Number.isFinite(quantity) || quantity <= 0) {
+  if (!from || !to || !item) {
     return res.status(400).json({ message: "fromBrandName, toBrandName, itemName, qty are required" });
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return res.status(400).json({ message: "Quantity must be greater than 0" });
   }
   if (from === to) {
     return res.status(400).json({ message: "fromBrandName and toBrandName must be different" });
   }
 
+  // ingredientBrand is optional — when omitted, match any value for that field.
+  // A query for ingredientBrand:"" does NOT match documents where the field is absent,
+  // so the filter is only applied when an explicit value was provided by the caller.
+  const stockFilter = { brandName: from, itemName: item };
+  if (ingBrand) stockFilter.ingredientBrand = ingBrand;
+
   // Pre-flight read outside session — produces a clear error before acquiring the session lock.
-  const preCheck = await BrandStock.findOne(
-    { brandName: from, itemName: item, ingredientBrand: ingBrand },
-    { status: 1, qtyRemaining: 1 }
-  ).lean();
+  const preCheck = await BrandStock.findOne(stockFilter, { status: 1, qtyRemaining: 1 }).lean();
 
   if (!preCheck) {
     return res.status(400).json({ message: "Insufficient stock to transfer" });
@@ -77,9 +83,7 @@ export const transferBrandStock = async (req, res) => {
     // The balance filter re-checks qty within the session to guard against concurrent transfers.
     const fromDoc = await BrandStock.findOneAndUpdate(
       {
-        brandName: from,
-        itemName: item,
-        ingredientBrand: ingBrand,
+        ...stockFilter,
         status: "Pending",
         qtyRemaining: { $gte: quantity },
       },
@@ -106,8 +110,11 @@ export const transferBrandStock = async (req, res) => {
 
     // Destination credit — atomic with source debit inside the same transaction.
     // If this throws, the transaction aborts and the source debit is rolled back.
+    const destFilter = { brandName: to, itemName: item };
+    if (ingBrand) destFilter.ingredientBrand = ingBrand;
+
     const toDoc = await BrandStock.findOneAndUpdate(
-      { brandName: to, itemName: item, ingredientBrand: ingBrand },
+      destFilter,
       {
         $setOnInsert: {
           uom: unit || fromDoc.uom,
@@ -134,7 +141,7 @@ export const transferBrandStock = async (req, res) => {
     await session.commitTransaction();
     return res.json({ success: true, data: { from: fromDoc, to: toDoc } });
   } catch (err) {
-    await session.abortTransaction();
+    try { await session.abortTransaction(); } catch (_) { /* session already closed or expired */ }
     console.error("Transfer brand stock error:", err?.message || err);
     return res.status(500).json({ message: "Failed to transfer stock" });
   } finally {
