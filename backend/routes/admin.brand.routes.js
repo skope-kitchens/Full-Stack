@@ -362,18 +362,32 @@ router.patch(
       const { orderId } = req.params;
       const { status } = req.body;
 
+      const VALID_TRANSITIONS = {
+        PLACED:     ["PREPARING", "CANCELLED"],
+        PREPARING:  ["COMPLETED", "CANCELLED"],
+        COMPLETED:  [],
+        CANCELLED:  [],
+      };
+
       const order = await Order.findById(orderId);
       if (!order) {
         return res.status(404).json({ message: "Order not found" });
       }
 
+      const allowed = VALID_TRANSITIONS[order.status] || [];
+      if (!allowed.includes(status)) {
+        return res.status(400).json({
+          message: `Cannot transition order from "${order.status}" to "${status}".`,
+          allowedTransitions: allowed,
+        });
+      }
+
       order.status = status;
-      
-      // Set completedAt timestamp when marking as COMPLETED
+
       if (status === "COMPLETED" && !order.completedAt) {
         order.completedAt = new Date();
       }
-      
+
       await order.save();
 
       res.json({ success: true, order });

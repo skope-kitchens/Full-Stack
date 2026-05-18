@@ -244,6 +244,7 @@ export const reconcileStock = async (req, res) => {
     const { id } = req.params;
     const newQty = Number(req.body?.qtyRemaining);
     const note = String(req.body?.note || "").trim() || "Daily reconciliation";
+    const actorRole = req.user?.role || "";
 
     if (!Number.isFinite(newQty) || newQty < 0) {
       return res.status(400).json({ message: "qtyRemaining must be a non-negative number" });
@@ -270,6 +271,7 @@ export const reconcileStock = async (req, res) => {
             uom: current.uom || "",
             note,
             at: new Date(),
+            actorRole,
           },
         },
       },
