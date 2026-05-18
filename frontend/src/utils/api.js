@@ -35,7 +35,29 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
-})
+});
+
+// Global 401 handler — clears stale session and redirects to login.
+// Fires when JWT_SECRET is rotated or a token expires mid-session.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      try {
+        sessionStorage.removeItem("skope_auth_token");
+        sessionStorage.removeItem("skope_auth_role");
+        sessionStorage.removeItem("skope_auth_usertype");
+        sessionStorage.removeItem("skope_user");
+        localStorage.removeItem("token");
+        localStorage.removeItem("userType");
+      } catch {}
+      if (!window.location.pathname.includes("/login")) {
+        window.location.href = "/login";
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 /* ---------- INVENTORY (Ingredients source) ---------- */
 export const fetchInventoryItems = (branchCode) =>
   api.get("/api/inventory/items", {

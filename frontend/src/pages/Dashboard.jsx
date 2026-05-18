@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../utils/api";
 import Layout from "../components/Layout";
+import toast from "../utils/toast";
 
 const BRANCH_OPTIONS = ["BEN", "MAR", "JNG", "KOR", "HO"];
 
@@ -133,22 +134,20 @@ export default function Dashboard() {
 
         setWallet(walletData);
         setTransactions(walletData.transactions);
-
-        alert("Wallet updated successfully");
-
+        toast.success("Wallet recharged successfully");
       }
     };
     const rzp = new window.Razorpay(options);
     rzp.open();
   } catch (err) {
-    alert("Payment failed");
+    toast.error("Payment failed. Please try again.");
     console.error(err);
   }
 };
 
   const payDue = async () => {
     if (!wallet?.dueAmount || wallet.dueAmount <= 0) {
-      alert("No due amount to pay");
+      toast.info("No due amount to pay");
       return;
     }
 
@@ -188,16 +187,16 @@ export default function Dashboard() {
           setTransactions(walletData.transactions);
 
           if (walletData.dueAmount === 0) {
-            alert("Due amount cleared successfully!");
+            toast.success("Due amount cleared successfully!");
           } else {
-            alert("Payment successful! Due amount partially cleared.");
+            toast.success("Payment successful — due amount partially cleared.");
           }
         }
       };
       const rzp = new window.Razorpay(options);
       rzp.open();
     } catch (err) {
-      alert("Payment failed");
+      toast.error("Payment failed. Please try again.");
       console.error(err);
     }
   };
@@ -253,9 +252,9 @@ export default function Dashboard() {
         )
       );
       
-      alert("Order marked as received!");
+      toast.success("Order marked as received!");
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to mark order as received");
+      toast.error(err.response?.data?.message || "Failed to mark order as received");
     }
   };
 
@@ -287,8 +286,8 @@ export default function Dashboard() {
 
   /* ---------------- DAILY ANALYTICS ---------------- */
   const fetchAnalytics = async () => {
-    if (selectedBranches.length === 0 || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-      alert("Select branches and date (YYYY-MM-DD)");
+    if (selectedBranches.length === 0 || !day) {
+      toast.info("Select at least one branch and a date");
       return;
     }
 
@@ -300,7 +299,7 @@ export default function Dashboard() {
       });
       setAnalytics(res.data);
     } catch {
-      alert("Failed to load analytics");
+      toast.error("Failed to load analytics");
       setAnalytics(null);
     } finally {
       setLoading(false);
@@ -310,7 +309,7 @@ export default function Dashboard() {
   /* ---------------- CLIENT RANGE ANALYTICS ---------------- */
   const fetchClientAnalytics = async () => {
   if (!fromDate || !toDate || selectedBranches.length === 0) {
-    alert("Select branches, FROM date and TO date");
+    toast.info("Select branches and both date fields");
     return;
   }
 
@@ -388,7 +387,7 @@ export default function Dashboard() {
     setClientAnalytics(aggregate);
   } catch (err) {
     console.error(err);
-    alert("Failed to aggregate analytics");
+    toast.error("Failed to load analytics");
     setClientAnalytics(null);
   } finally {
     setClientLoading(false);
@@ -618,15 +617,11 @@ export default function Dashboard() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">
-                  Day (YYYY-MM-DD)
-                </label>
+                <label className="block text-sm font-medium mb-2">Date</label>
                 <input
                   type="date"
                   value={day}
-                  onChange={(e) =>
-                    setDay(e.target.value.replace(/[^0-9-]/g, ""))
-                  }
+                  onChange={(e) => setDay(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2"
                 />
               </div>
@@ -1075,9 +1070,9 @@ export default function Dashboard() {
                     await api.post("/api/menu-entries", { items });
                     setShowEnterMenu(false);
                     setMenuRows([{ recipeName: "", qty: 1, uom: "GM", cost: 0 }]);
-                    alert("Menu saved");
+                    toast.success("Menu submitted successfully");
                   } catch (err) {
-                    alert(err.response?.data?.message || "Failed to save menu");
+                    toast.error(err.response?.data?.message || "Failed to save menu");
                   } finally {
                     setMenuSaving(false);
                   }

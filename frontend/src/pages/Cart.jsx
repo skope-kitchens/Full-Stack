@@ -1,5 +1,6 @@
 import Layout from "../components/Layout";
 import { useCart } from "../context/CartContext";
+import toast from "../utils/toast";
 
 export default function Cart() {
   const { cartItems, updateQuantity, removeItem, clearCart } = useCart();
@@ -36,12 +37,12 @@ export default function Cart() {
       }
 
       if (!user) {
-        alert("Please login before checkout.");
+        toast.error("Please login before checkout.");
         return;
       }
 
       if (!user.address) {
-        alert("Delivery address not found. Please complete your profile.");
+        toast.error("Delivery address not found. Please complete your profile.");
         return;
       }
 
@@ -117,9 +118,7 @@ export default function Cart() {
           // 4️⃣ Clear cart AFTER stock updated
           // --------------------------------------
           clearCart();
-
-          alert("Payment successful 🎉 Stock updated & order placed!");
-
+          toast.success("Payment successful — order placed!");
         },
 
         theme: { color: "#000000" },
@@ -129,7 +128,7 @@ export default function Cart() {
       rzp.open();
     } catch (err) {
       console.error(err);
-      alert("Payment failed");
+      toast.error("Payment failed. Please try again.");
     }
   };
 

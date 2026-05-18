@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { fetchFoodCost } from "../utils/costingapi.js";
 import Layout from "../components/Layout";
 import api from "../utils/api.js";
+import toast from "../utils/toast.js";
 
 export default function OrderDish() {
   const [dish, setDish] = useState("");
@@ -40,7 +41,7 @@ export default function OrderDish() {
       const result = await fetchFoodCost(dish);
       setData(result);
     } catch (err) {
-      alert(err.response?.data?.error || err.message);
+      toast.error(err.response?.data?.error || err.message || "Failed to load recipe cost");
     } finally {
       setLoading(false);
     }
@@ -779,13 +780,10 @@ function OrderModal({ dishes, orderItems, setOrderItems, onClose, api, fetchFood
                         }))
                     });
 
-                    alert(
-                        `Payment successful!\nRemaining Wallet Balance: ₹${res.data.remainingBalance}`
-                    );
-
-                    onClose(); // close modal
+                    toast.success(`Payment successful! Remaining balance: ₹${res.data.remainingBalance}`);
+                    onClose();
                     } catch (err) {
-                    alert(
+                    toast.error(
                         err.response?.data?.message ||
                         "Wallet payment failed"
                     );

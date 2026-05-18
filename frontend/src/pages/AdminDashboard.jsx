@@ -6,6 +6,7 @@ import BrandDrawer from "./BrandDrawer";
 import api from "../utils/api";
 import { fetchFoodCost } from "../utils/costingapi";
 import { authUtils } from "../utils/auth";
+import toast from "../utils/toast";
 
 const AdminDashboard = () => {
   const [selectedBrand, setSelectedBrand] = useState(null);
@@ -1547,7 +1548,7 @@ function IngredientInventoryModal({ onClose }) {
       await api.patch(`/api/ingredient-indent/${id}/verify`, { cost });
       await fetchRows("indent");
     } catch (err) {
-      alert(err.response?.data?.message || "Verify failed");
+      toast.error(err.response?.data?.message || "Verify failed");
     }
   };
 
@@ -1555,8 +1556,9 @@ function IngredientInventoryModal({ onClose }) {
     try {
       await api.patch(`/api/ingredient-indent/${id}/issue`);
       await fetchRows("indent");
+      toast.success("Item issued successfully");
     } catch (err) {
-      alert(err.response?.data?.message || "Issue failed");
+      toast.error(err.response?.data?.message || "Issue failed");
     }
   };
 
@@ -1564,11 +1566,10 @@ function IngredientInventoryModal({ onClose }) {
     if (!window.confirm("Delete this issued item? This cannot be undone.")) return;
     try {
       await api.delete(`/api/ingredient-indent/${id}`);
-      // optimistic remove + refresh (keeps list correct if filters change)
       setRows((prev) => prev.filter((r) => r._id !== id));
       await fetchRows("issue");
     } catch (err) {
-      alert(err.response?.data?.message || "Delete failed");
+      toast.error(err.response?.data?.message || "Delete failed");
     }
   };
 
@@ -1796,9 +1797,9 @@ function GrnModal({ onClose }) {
                     ingredientName: ingredientName.trim(),
                   });
                   setIngredientName("");
-                  alert("Credit note alert sent to Ingredient Admin");
+                  toast.success("Credit note alert sent to Ingredient Admin");
                 } catch (err) {
-                  alert(err.response?.data?.message || "Failed to send credit note");
+                  toast.error(err.response?.data?.message || "Failed to send credit note");
                 } finally {
                   setSending(false);
                 }
@@ -1904,7 +1905,7 @@ function CreditNoteModal({ onClose }) {
       await api.delete(`/api/credit-notes/${id}`);
       setRows((prev) => prev.filter((r) => r._id !== id));
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete credit note");
+      toast.error(err.response?.data?.message || "Failed to delete credit note");
     }
   };
 
@@ -2084,7 +2085,7 @@ function TrialTrainingModal({ onClose }) {
         setItems([]);
       }
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete trial recipe");
+      toast.error(err.response?.data?.message || "Failed to delete trial recipe");
     }
   };
 
@@ -2098,7 +2099,7 @@ function TrialTrainingModal({ onClose }) {
         setItems([]);
       }
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete training recipe");
+      toast.error(err.response?.data?.message || "Failed to delete training recipe");
     }
   };
 
@@ -2330,6 +2331,10 @@ function RecipeInventoryModal({ onClose }) {
   const [downloading, setDownloading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [markingUsedId, setMarkingUsedId] = useState(null);
+  const [reconcilingId, setReconcilingId] = useState(null);
+  const [reconcileQty, setReconcileQty] = useState("");
+  const [reconcileNote, setReconcileNote] = useState("");
+  const [submittingReconcile, setSubmittingReconcile] = useState(false);
   const [transfer, setTransfer] = useState({
     fromBrandName: "",
     toBrandName: "",
@@ -2391,7 +2396,7 @@ function RecipeInventoryModal({ onClose }) {
       await loadStock(selectedBrand);
       setTransfer((p) => ({ ...p, itemName: "", ingredientBrand: "", uom: "", qty: "" }));
     } catch (err) {
-      alert(err.response?.data?.message || "Delete failed");
+      toast.error(err.response?.data?.message || "Delete failed");
     } finally {
       setDeletingId(null);
     }
@@ -2406,10 +2411,35 @@ function RecipeInventoryModal({ onClose }) {
       await api.patch(`/api/brand-stock/${rowId}/used`);
       await loadStock(selectedBrand);
       setTransfer((p) => ({ ...p, itemName: "", ingredientBrand: "", uom: "", qty: "" }));
+      toast.success("Item marked as Used");
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to mark used");
+      toast.error(err.response?.data?.message || "Failed to mark used");
     } finally {
       setMarkingUsedId(null);
+    }
+  };
+
+  const handleReconcile = async (rowId) => {
+    const qty = Number(reconcileQty);
+    if (!Number.isFinite(qty) || qty < 0) {
+      toast.error("Enter a valid quantity (0 or greater).");
+      return;
+    }
+    setSubmittingReconcile(true);
+    try {
+      await api.patch(`/api/brand-stock/${rowId}/reconcile`, {
+        qtyRemaining: qty,
+        note: reconcileNote.trim() || "Manual reconciliation",
+      });
+      setReconcilingId(null);
+      setReconcileQty("");
+      setReconcileNote("");
+      await loadStock(selectedBrand);
+      toast.success("Stock reconciled");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Reconcile failed");
+    } finally {
+      setSubmittingReconcile(false);
     }
   };
 
@@ -2476,7 +2506,7 @@ function RecipeInventoryModal({ onClose }) {
       const allRows = res.data?.data || [];
       downloadCsv(allRows);
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to download inventory");
+      toast.error(err.response?.data?.message || "Failed to download inventory");
     } finally {
       setDownloading(false);
     }
@@ -2569,25 +2599,75 @@ function RecipeInventoryModal({ onClose }) {
                           {r.status || "Pending"}
                         </span>
                       </td>
-                      <td className="p-2">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRow(r._id)}
-                          disabled={deletingId === r._id}
-                          className="text-red-600 text-sm hover:underline disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
+                      <td className="p-2 space-y-1">
+                        <div className="flex gap-3 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRow(r._id)}
+                            disabled={deletingId === r._id}
+                            className="text-red-600 text-xs hover:underline disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
 
-                        {(r.status || "Pending") === "Pending" && (
-                          <div className="mt-2">
+                          {(r.status || "Pending") === "Pending" && (
                             <button
                               type="button"
                               onClick={() => handleMarkUsed(r._id)}
                               disabled={markingUsedId === r._id}
-                              className="text-blue-700 text-sm hover:underline disabled:opacity-50"
+                              className="text-blue-700 text-xs hover:underline disabled:opacity-50"
                             >
                               {markingUsedId === r._id ? "Marking..." : "Mark Used"}
+                            </button>
+                          )}
+
+                          {(r.status || "Pending") === "Pending" && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReconcilingId(reconcilingId === r._id ? null : r._id);
+                                setReconcileQty(String(r.qtyRemaining ?? ""));
+                                setReconcileNote("");
+                              }}
+                              className="text-orange-600 text-xs hover:underline"
+                            >
+                              Reconcile
+                            </button>
+                          )}
+                        </div>
+
+                        {reconcilingId === r._id && (
+                          <div className="mt-1 flex gap-2 items-center flex-wrap">
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={reconcileQty}
+                              onChange={(e) => setReconcileQty(e.target.value)}
+                              placeholder="New qty"
+                              className="border rounded px-2 py-1 text-xs w-20 focus:outline-none focus:ring-1 focus:ring-orange-400"
+                            />
+                            <input
+                              type="text"
+                              value={reconcileNote}
+                              onChange={(e) => setReconcileNote(e.target.value)}
+                              placeholder="Note (optional)"
+                              className="border rounded px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-orange-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleReconcile(r._id)}
+                              disabled={submittingReconcile}
+                              className="bg-orange-600 text-white px-2 py-1 rounded text-xs disabled:opacity-50"
+                            >
+                              {submittingReconcile ? "Saving..." : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReconcilingId(null)}
+                              className="text-gray-500 text-xs hover:underline"
+                            >
+                              Cancel
                             </button>
                           </div>
                         )}
@@ -2679,9 +2759,9 @@ function RecipeInventoryModal({ onClose }) {
                       ...transfer,
                       qty: Number(transfer.qty || 0),
                     });
-                    alert("Transferred");
+                    toast.success("Stock transferred successfully");
                     setTransfer({
-                      fromBrandName: "",
+                      fromBrandName: selectedBrand,
                       toBrandName: "",
                       itemName: "",
                       ingredientBrand: "",
@@ -2690,7 +2770,7 @@ function RecipeInventoryModal({ onClose }) {
                     });
                     await loadStock(selectedBrand);
                   } catch (err) {
-                    alert(err.response?.data?.message || "Transfer failed");
+                    toast.error(err.response?.data?.message || "Transfer failed");
                   }
                 }}
                 disabled={
@@ -2839,16 +2919,29 @@ function FcrRecipeCostBreakdown({ data, loading }) {
         </div>
       </div>
 
-      <div className="bg-[#111] text-white p-6 rounded-2xl">
-        <CostRow label="Food Cost" value={data.foodCost} />
-        <CostRow label="Packaging Cost" value={data.packagingCost} />
+      <div className="bg-[#111] text-white p-6 rounded-2xl flex flex-col gap-1">
+        <CostRow label="Food Cost" value={Number(data.foodCost || 0).toFixed(2)} />
+        <CostRow label="Packaging Cost" value={Number(data.packagingCost || 0).toFixed(2)} />
         <CostRow
           label="Production Variance (5%)"
-          value={data.productionVariance}
+          value={Number(data.productionVariance || 0).toFixed(2)}
         />
-        <div className="border-t mt-4 pt-4 flex justify-between font-bold">
-          <span>Total</span>
-          <span>₹{data.total}</span>
+        <div className="border-t border-white/20 mt-3 pt-3 flex justify-between font-bold text-lg">
+          <span>Total Cost</span>
+          <span>₹{Number(data.total || 0).toFixed(2)}</span>
+        </div>
+        <div className="border-t border-white/10 mt-3 pt-3 space-y-2">
+          <p className="text-xs text-gray-400 uppercase tracking-wide">FCR Analysis (target 32%)</p>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-300">Suggested Price</span>
+            <span className="font-bold text-green-400">
+              ₹{(Number(data.total || 0) / 0.32).toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-300">FCR at suggested</span>
+            <span className="font-semibold text-green-400">32.0%</span>
+          </div>
         </div>
       </div>
     </div>
@@ -2898,7 +2991,7 @@ function FcrModal({ onClose }) {
       );
       setBreakdownCache((prev) => ({ ...prev, [recipe._id]: breakdown }));
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to load breakdown");
+      toast.error(err.response?.data?.message || "Failed to load breakdown");
     } finally {
       setLoadingRecipeId(null);
     }
@@ -3118,11 +3211,22 @@ function CheckStockModal({ onClose }) {
 function StockUpdateModal({ onClose }) {
   const emptyItem = { itemName: "", uom: "", issueQty: "", usedQty: "", wastageQty: "", remainingQty: "" };
 
+  const [brands, setBrands] = useState([]);
   const [brandId, setBrandId] = useState("");
-  const [date, setDate] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [items, setItems] = useState([{ ...emptyItem }]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.get("/api/admin/brands")
+      .then((res) => {
+        const list = res.data?.data || [];
+        setBrands(list);
+        if (list.length) setBrandId(list[0]._id);
+      })
+      .catch(() => setBrands([]));
+  }, []);
 
   const updateItem = (idx, field, value) => {
     setItems((prev) => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
@@ -3136,7 +3240,7 @@ function StockUpdateModal({ onClose }) {
     e.preventDefault();
     setError("");
 
-    if (!brandId.trim()) return setError("Brand ID is required.");
+    if (!brandId) return setError("Brand is required.");
     if (!date) return setError("Date is required.");
     if (items.length === 0) return setError("Add at least one item.");
 
@@ -3156,8 +3260,8 @@ function StockUpdateModal({ onClose }) {
 
     setSubmitting(true);
     try {
-      await api.post("/api/stock-updates", { brandId: brandId.trim(), date, items: parsedItems });
-      alert("Stock updated successfully");
+      await api.post("/api/stock-updates", { brandId, date, items: parsedItems });
+      toast.success("Stock updated successfully");
       onClose();
     } catch (err) {
       setError(err.response?.data?.message || "Failed to submit stock update.");
@@ -3183,14 +3287,17 @@ function StockUpdateModal({ onClose }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Brand ID</label>
-              <input
-                type="text"
+              <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+              <select
                 value={brandId}
                 onChange={(e) => setBrandId(e.target.value)}
-                placeholder="MongoDB ObjectId of brand"
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-              />
+              >
+                {brands.length === 0 && <option value="">Loading brands...</option>}
+                {brands.map((b) => (
+                  <option key={b._id} value={b._id}>{b.brandName}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>

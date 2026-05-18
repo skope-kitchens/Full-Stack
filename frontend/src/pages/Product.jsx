@@ -3,6 +3,7 @@ import Layout from "../components/Layout";
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { useCart } from "../context/CartContext";
+import toast from "../utils/toast";
 
 export default function Product() {
   const { addToCart } = useCart();
@@ -120,7 +121,7 @@ export default function Product() {
       unit: offer.unit,
     });
 
-    alert("Product added to cart");
+    toast.success("Product added to cart");
   };
 
   return (

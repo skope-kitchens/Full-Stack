@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Layout from "../components/Layout";
 import api from "../utils/api";
+import toast from "../utils/toast";
 
 const MEETING_COST = 60;
 
@@ -90,7 +91,7 @@ const ContactUs = () => {
     const user = safeGetJSON("skope_user");
     const token = safeGet("skope_auth_token") || safeGet("token");
     if (!user || !token) {
-      alert("Please log in first to book a meeting.");
+      toast.error("Please log in first to book a meeting.");
       return;
     }
     setSelectedManager(team?.manager || null);

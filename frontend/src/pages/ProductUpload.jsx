@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Upload, X, Plus } from "lucide-react";
 import Layout from "../components/Layout";
+import toast from "../utils/toast";
 
 export default function ProductUpload() {
   const [formData, setFormData] = useState({
@@ -106,7 +107,7 @@ export default function ProductUpload() {
 
     if (!res.ok) throw new Error("Failed to upload");
 
-    alert("Product uploaded successfully!");
+    toast.success("Product uploaded successfully!");
 
 
       // reset
@@ -133,7 +134,7 @@ export default function ProductUpload() {
       setImagePreview(null);
     } catch (err) {
       console.error(err);
-      alert("Upload failed");
+      toast.error("Upload failed. Please try again.");
     } finally {
       setLoading(false);
     }

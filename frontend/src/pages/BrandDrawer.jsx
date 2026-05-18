@@ -3,6 +3,7 @@ import api from "../utils/api";
 import { OrderRecipeBreakdown } from "./OrderDish";
 import { fetchFoodCost } from "../utils/costingapi";
 import { useNavigate } from "react-router-dom";
+import toast from "../utils/toast";
 
 import WalletPanel from "./WalletPanel";
 import ServiceChecklist from "./ServiceChecklist";
@@ -107,7 +108,7 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
         )
       );
     } catch (err) {
-      alert("Failed to update order");
+      toast.error("Failed to update order status");
     }
   };
 
@@ -119,7 +120,7 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
       setOrders((prev) => prev.filter((o) => o._id !== orderId));
       if (showRecipesOrderId === orderId) setShowRecipesOrderId(null);
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete order");
+      toast.error(err.response?.data?.message || "Failed to delete order");
     }
   };
 
@@ -176,15 +177,18 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
 
               <button
                 onClick={async () => {
-                  await api.post("/api/wallet/admin/wallet/due", {
-                    userId: brand._id,
-                    amount: dueAmount,
-                    reason: dueReason
-                  });
-
-                  alert("Due added successfully");
-                  setDueAmount("");
-                  setDueReason("");
+                  try {
+                    await api.post("/api/wallet/admin/wallet/due", {
+                      userId: brand._id,
+                      amount: dueAmount,
+                      reason: dueReason
+                    });
+                    toast.success("Due amount added");
+                    setDueAmount("");
+                    setDueReason("");
+                  } catch (err) {
+                    toast.error(err.response?.data?.message || "Failed to add due");
+                  }
                 }}
                 className="bg-red-600 text-white px-4 py-2 rounded"
               >
@@ -227,11 +231,9 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
                     className="border rounded-lg p-4"
                   >
                     {/* ORDER HEADER */}
-                    <div className="flex justify-between items-center mb-2">
+                    <div className="flex justify-between items-center mb-1">
                       <div>
-                        <span className="font-semibold">
-                          ₹{order.amount}
-                        </span>
+                        <span className="font-semibold">₹{order.amount}</span>
                         {order.isReceived && (
                           <span className="ml-2 text-xs px-2 py-1 rounded bg-blue-100 text-blue-800">
                             ✓ Received
@@ -245,12 +247,22 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
                             ? "bg-yellow-100 text-yellow-800"
                             : order.status === "PREPARING"
                             ? "bg-blue-100 text-blue-800"
+                            : order.status === "CANCELLED"
+                            ? "bg-red-100 text-red-700"
                             : "bg-green-100 text-green-800"
                         }`}
                       >
                         {order.status}
                       </span>
                     </div>
+
+                    {order.createdAt && (
+                      <p className="text-xs text-gray-400 mb-2">
+                        {new Date(order.createdAt).toLocaleString("en-IN", {
+                          day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
+                        })}
+                      </p>
+                    )}
 
                     {/* ITEMS */}
                     <ul className="text-sm text-gray-600 mb-3">
@@ -280,12 +292,7 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
 
                       {order.status === "PLACED" && (
                         <button
-                          onClick={() =>
-                            updateOrderStatus(
-                              order._id,
-                              "PREPARING"
-                            )
-                          }
+                          onClick={() => updateOrderStatus(order._id, "PREPARING")}
                           className="text-sm text-blue-600 hover:underline"
                         >
                           Mark Preparing
@@ -294,15 +301,23 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
 
                       {order.status === "PREPARING" && (
                         <button
-                          onClick={() =>
-                            updateOrderStatus(
-                              order._id,
-                              "COMPLETED"
-                            )
-                          }
+                          onClick={() => updateOrderStatus(order._id, "COMPLETED")}
                           className="text-sm text-green-600 hover:underline"
                         >
                           Mark Completed
+                        </button>
+                      )}
+
+                      {(order.status === "PLACED" || order.status === "PREPARING") && (
+                        <button
+                          onClick={() => {
+                            if (window.confirm("Cancel this order? This cannot be undone.")) {
+                              updateOrderStatus(order._id, "CANCELLED");
+                            }
+                          }}
+                          className="text-sm text-red-500 hover:underline"
+                        >
+                          Cancel
                         </button>
                       )}
 

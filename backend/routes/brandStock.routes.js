@@ -21,7 +21,7 @@ router.get(
   listAllBrandStock
 );
 
-// MUTATIONS — INGREDIENT_MANAGER only (irreversible ledger writes)
+// IRREVERSIBLE MUTATIONS — INGREDIENT_MANAGER only
 router.post("/brand-stock/transfer", authMiddleware, requireRole("INGREDIENT_MANAGER"), transferBrandStock);
 router.delete(
   "/brand-stock/:id",
@@ -35,10 +35,12 @@ router.patch(
   requireRole("INGREDIENT_MANAGER"),
   markBrandStockUsed
 );
+
+// RECONCILE — both roles (qty correction, not destructive; RECIPE_MANAGER needs this in RecipeInventoryModal)
 router.patch(
   "/brand-stock/:id/reconcile",
   authMiddleware,
-  requireRole("INGREDIENT_MANAGER"),
+  requireRole("RECIPE_MANAGER", "INGREDIENT_MANAGER"),
   reconcileStock
 );
 

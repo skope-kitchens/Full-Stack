@@ -1,5 +1,6 @@
 import { useState } from "react";
 import api from "../utils/api";
+import toast from "../utils/toast";
 
 const WalletPanel = ({ brandId, balance }) => {
   const [amount, setAmount] = useState("");
@@ -12,7 +13,8 @@ const WalletPanel = ({ brandId, balance }) => {
 
   const deduct = async () => {
     if (!amount || !reason) {
-      return alert("Amount and reason are required");
+      toast.error("Amount and reason are required");
+      return;
     }
 
     setLoading(true);
@@ -22,10 +24,10 @@ const WalletPanel = ({ brandId, balance }) => {
         amount: Number(amount),
         reason
       });
-      alert("Wallet deducted successfully");
+      toast.success("Wallet deducted successfully");
       window.location.reload();
     } catch (err) {
-      alert("Failed to deduct wallet");
+      toast.error(err.response?.data?.message || "Failed to deduct wallet");
     } finally {
       setLoading(false);
     }

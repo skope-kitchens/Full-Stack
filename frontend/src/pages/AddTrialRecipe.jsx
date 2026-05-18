@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../utils/api.js";
 import RecipeItem from "../components/RecipeItem.jsx";
 import { authUtils } from "../utils/auth.js";
+import toast from "../utils/toast.js";
 
 const EMPTY_NODE = () => ({
   type: "INGREDIENT",
@@ -104,7 +105,7 @@ export default function AddTrialRecipe() {
     };
 
     await api.post("/api/trial-recipes", payload);
-    alert("Trial recipe saved");
+    toast.success("Trial recipe saved");
   };
 
   return (

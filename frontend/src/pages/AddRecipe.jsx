@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../utils/api.js";
 import RecipeItem from "../components/RecipeItem.jsx";
 import { authUtils } from "../utils/auth.js";
+import toast from "../utils/toast.js";
 
 const EMPTY_NODE = () => ({
   type: "INGREDIENT", // INGREDIENT | SUBRECIPE
@@ -131,9 +132,9 @@ export default function AddRecipe() {
       } else {
         await api.post("/api/subrecipes", payload);
       }
-      alert("Recipe saved");
+      toast.success("Recipe saved successfully");
     } catch (err) {
-      alert(err?.response?.data?.message || "Failed to save recipe");
+      toast.error(err?.response?.data?.message || "Failed to save recipe");
     }
   };
 

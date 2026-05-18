@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../utils/api";
+import toast from "../utils/toast";
 
 const fetchServices = (brandId) =>
   api.get(`/api/admin/services/${brandId}`).then((res) => res.data.services);
@@ -57,7 +58,7 @@ const ServiceChecklist = ({ brandId, editable }) => {
       });
       setServices(res.data.services || []);
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete service");
+      toast.error(err.response?.data?.message || "Failed to delete service");
     }
   };
 
