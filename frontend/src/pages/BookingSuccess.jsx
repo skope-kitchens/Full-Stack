@@ -27,12 +27,6 @@ const BookingSuccess = () => {
   const confirmBooking = useCallback(async () => {
     if (!sessionId) return;
 
-    console.log("[BOOKING_SUCCESS] Calling confirm API", {
-      href: window.location.href,
-      searchParams: Object.fromEntries(searchParams.entries()),
-      sessionId,
-    });
-
     setStatus("loading");
     setErrorMessage("");
 
@@ -42,10 +36,6 @@ const BookingSuccess = () => {
         { sessionId },
         { withCredentials: true }
       );
-
-      console.log("[BOOKING_SUCCESS] Confirm API response", {
-        data: res.data,
-      });
 
       if (localStorageKey) {
         localStorage.setItem(localStorageKey, "true");
@@ -68,14 +58,6 @@ const BookingSuccess = () => {
 
   // Initial effect – run once for this sessionId.
   useEffect(() => {
-    console.log("[BOOKING_SUCCESS] Mount / param parse", {
-      href: window.location.href,
-      searchParams: Object.fromEntries(searchParams.entries()),
-      sessionIdFromA1,
-      sessionIdFromLegacy,
-      effectiveSessionId: sessionId,
-    });
-
     if (!sessionId) {
       setStatus("invalid");
       return;
@@ -86,10 +68,6 @@ const BookingSuccess = () => {
       setStatus("success");
       return;
     }
-
-    console.log("[BOOKING_SUCCESS] Auto-confirming booking", {
-      sessionId,
-    });
 
     confirmBooking();
   }, [sessionId, localStorageKey, confirmBooking, searchParams, sessionIdFromA1, sessionIdFromLegacy]);

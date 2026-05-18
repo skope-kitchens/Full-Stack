@@ -30,7 +30,6 @@ const Login = () => {
     setStatus({ type: '', message: '' })
 
     try {
-      console.log("API URL:", import.meta.env.VITE_API_BASE_URL);
       const { data } = await api.post('/api/auth/login', {
         email: formData.email,
         password: formData.password

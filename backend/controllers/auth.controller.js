@@ -165,8 +165,12 @@ export const sendPhoneOtp = async (req, res) => {
       usedAt: null,
     });
 
-    // In absence of SMS provider, we log OTP for dev/testing.
-    console.log(`[OTP] phoneNumber=${normalizedPhone} otp=${otp}`);
+    // In absence of SMS provider, log OTP for local development only.
+    // Never log OTP values in production — phone numbers and active codes in server logs
+    // are readable by anyone with Render log access during the 5-minute validity window.
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[OTP] phoneNumber=${normalizedPhone} otp=${otp}`);
+    }
 
     return res.json({
       success: true,

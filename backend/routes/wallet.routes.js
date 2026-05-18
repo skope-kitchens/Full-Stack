@@ -343,14 +343,45 @@ router.post("/pay", authMiddleware, async (req, res) => {
 
 
 
-const order = await Order.create({
-  brand: user._id,
-  items: normalizedItems,
-  amount: payAmount,
-  paymentMethod: "wallet",
-  status: "PLACED",
-  isSeenByAdmin: false
-});
+    // Order creation is structurally outside the wallet deduction operation.
+    // If it fails, the wallet has already been debited — issue a compensating credit
+    // so the user's balance is restored and the 500 response is honest.
+    let order;
+    try {
+      order = await Order.create({
+        brand: user._id,
+        items: normalizedItems,
+        amount: payAmount,
+        paymentMethod: "wallet",
+        status: "PLACED",
+        isSeenByAdmin: false,
+      });
+    } catch (orderErr) {
+      console.error("Order creation failed after wallet deduction — compensating:", orderErr?.message);
+      let compensated = false;
+      try {
+        await User.findByIdAndUpdate(userId, {
+          $inc: { "wallet.balance": payAmount },
+          $push: {
+            "wallet.transactions": {
+              type: "credit",
+              amount: payAmount,
+              source: "system",
+              reason: "ORDER_CREATION_FAILED_REFUND",
+            },
+          },
+        });
+        compensated = true;
+      } catch (refundErr) {
+        // Compensation failed — manual recovery required. Log everything ops needs.
+        console.error("[CRITICAL] Wallet compensation failed. Manual recovery required —", { userId, amount: payAmount, error: refundErr?.message });
+      }
+      return res.status(500).json({
+        message: compensated
+          ? "Payment failed — your wallet has not been charged"
+          : "Payment failed — please contact support to verify your wallet balance",
+      });
+    }
 
     /* ================= INVENTORY LEDGER UPDATE (PAYMENT SUCCESS) ================= */
     try {

@@ -72,9 +72,8 @@ const VendorEligibility = () => {
       await api.post("/api/vendor-eligibility", formData);
       navigate("/dashboard");
     } catch (err) {
-  console.log("API ERROR:", err.response?.status, err.response?.data);
-}
- finally {
+      console.error("Vendor eligibility submission failed:", err?.message);
+    } finally {
       setLoading(false);
     }
   };
