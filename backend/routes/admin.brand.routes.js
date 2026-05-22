@@ -1,11 +1,21 @@
 import express from "express";
 import User from "../models/user.js";
+import Brand from "../models/brand.js";
+import BrandStock from "../models/brandStock.js";
+import MainRecipe from "../models/mainrecipe.models.js";
 import BrandServiceChecklist from "../models/brandServiceChecklist.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireAdmin.js";
 import Order from "../models/order.js";
 import IngredientIndent from "../models/ingredientIndent.js";
 import MenuEntry from "../models/menuEntry.js";
+import Projection from "../models/projection.js";
+import {
+  extractIngredientsFromBOM,
+  aggregateIngredients,
+  escapeRegex,
+  normalizeUom,
+} from "../utils/bomExpander.js";
 import {
   getAllRecipes,
   getRecipeBreakdown,
@@ -60,31 +70,30 @@ router.get(
         .sort({ createdAt: -1 })
         .lean();
 
-      // 2️⃣ Get unseen orders
-      const unseenOrders = await Order.find({
-        isSeenByAdmin: false
-      }).select("brand");
+      // 2️⃣ Run all signal queries in parallel — avoids serial round-trips
+      const [unseenOrders, unseenMenus, pendingProjections] = await Promise.all([
+        Order.find({ isSeenByAdmin: false }).select("brand").lean(),
+        MenuEntry.find({ isSeenByRecipeAdmin: false }).select("clientId").lean(),
+        Projection.find({ status: "PENDING_CHEF_REVIEW" }).select("brandId").lean(),
+      ]);
 
-      // 2️⃣b Get unseen menu entries
-      const unseenMenus = await MenuEntry.find({
-        isSeenByRecipeAdmin: false
-      }).select("clientId");
-
-      // 3️⃣ Build lookup set
+      // 3️⃣ Build O(1) lookup sets from the three signal arrays
       const brandIdsWithOrders = new Set(
         unseenOrders.map(o => o.brand.toString())
       );
       const brandIdsWithMenus = new Set(
         unseenMenus.map(m => m.clientId.toString())
       );
+      const brandIdsWithProjections = new Set(
+        pendingProjections.map(p => p.brandId.toString())
+      );
 
-      // 4️⃣ Attach hasNewOrder flag
+      // 4️⃣ Attach per-brand signal flags
       const result = brands.map(brand => ({
         ...brand,
-        hasNewOrder: brandIdsWithOrders.has(
-          brand._id.toString()
-        ),
+        hasNewOrder: brandIdsWithOrders.has(brand._id.toString()),
         hasNewMenu: brandIdsWithMenus.has(brand._id.toString()),
+        hasPendingProjection: brandIdsWithProjections.has(brand._id.toString()),
       }));
 
       res.json(result);
@@ -390,7 +399,91 @@ router.patch(
 
       await order.save();
 
-      res.json({ success: true, order });
+      // ── Stock deduction on PREPARING (best-effort, never fails the transition) ──
+      let deductedItems = [];
+      if (status === "PREPARING") {
+        try {
+          const orderUser = await User.findById(order.brand).select("brandName").lean();
+          const brandName = orderUser?.brandName;
+
+          if (brandName && order.items?.length > 0) {
+            const allIngredients = [];
+
+            for (const orderItem of order.items) {
+              const dishName = String(orderItem.dish || "").trim();
+              const dishQty  = Number(orderItem.qty || 1);
+              if (!dishName || dishQty <= 0) continue;
+
+              const recipe = await MainRecipe.findOne({ recipeName: dishName, brand: brandName }).lean()
+                          || await MainRecipe.findOne({ recipeName: dishName }).lean();
+
+              if (!recipe) {
+                console.warn(`[StockDeduct] No recipe for "${dishName}" (brand: ${brandName})`);
+                continue;
+              }
+
+              const ingredients = await extractIngredientsFromBOM(
+                recipe.items, dishQty, brandName, new Set()
+              );
+              allIngredients.push(...ingredients);
+            }
+
+            const aggregated = aggregateIngredients(allIngredients);
+
+            for (const [, d] of aggregated) {
+              try {
+                // Normalise qty to match whatever UOM the stock record uses.
+                // Live DB stores "kg" (lowercase); recipe schema uses "KG"/"GM".
+                // Strategy: deduct in the recipe's UOM; the stock record UOM is
+                // normalised before comparison so "kg" == "KG".
+                const updated = await BrandStock.findOneAndUpdate(
+                  {
+                    brandName,
+                    itemName: new RegExp(`^${escapeRegex(d.itemName)}$`, "i"),
+                    status: "Pending",
+                  },
+                  {
+                    $inc: { qtyRemaining: -d.qty },
+                    $push: {
+                      history: {
+                        type: "CONSUMED",
+                        qty: d.qty,
+                        uom: d.uom,
+                        at: new Date(),
+                        referenceId: order._id,
+                        referenceKind: "BATCH",
+                        actorRole: req.user?.role || "RECIPE_MANAGER",
+                        note: `Order ${order._id.toString().slice(-6).toUpperCase()} — Mark Preparing`,
+                        brandConsumer: brandName,
+                      },
+                    },
+                  },
+                  { new: true }
+                );
+                if (updated) {
+                  deductedItems.push({
+                    itemName: d.itemName,
+                    qty: Number(d.qty.toFixed(4)),
+                    uom: d.uom,
+                    newQty: Number((updated.qtyRemaining || 0).toFixed(4)),
+                  });
+                }
+              } catch (stockErr) {
+                console.error(`[StockDeduct] Failed for "${d.itemName}":`, stockErr?.message);
+              }
+            }
+
+            if (deductedItems.length > 0) {
+              console.log(`[StockDeduct] Order ${orderId}: deducted ${deductedItems.length} items for "${brandName}"`);
+            }
+          }
+        } catch (stockErr) {
+          console.error("[StockDeduct] Block failed:", stockErr?.message);
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────────
+
+      res.json({ success: true, order, deductedItems });
     } catch (err) {
       console.error("Failed to update order:", err);
       res.status(500).json({ message: "Failed to update order" });

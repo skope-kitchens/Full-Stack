@@ -208,6 +208,48 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
           </div>
         )}
 
+        {/* ================= PROJECTION ALERT (RECIPE MANAGER ONLY) ================= */}
+        {isRecipeAdmin && (
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={() => {
+                onClose?.();
+                navigate(`/admin/projection/${brand._id}`);
+              }}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-colors ${
+                brand.hasPendingProjection
+                  ? "border-red-400 bg-red-50 hover:bg-red-100"
+                  : "border-gray-200 bg-gray-50 hover:bg-gray-100"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-base">📋</span>
+                <div className="text-left">
+                  <p className={`text-sm font-semibold ${brand.hasPendingProjection ? "text-red-700" : "text-gray-700"}`}>
+                    Production Projection
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {brand.hasPendingProjection
+                      ? "Action required — projection pending review"
+                      : "View or process projections for this brand"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {brand.hasPendingProjection && (
+                  <span className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-100 px-2 py-1 rounded-full">
+                    <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    Pending
+                  </span>
+                )}
+                <span className="text-gray-400 text-sm">›</span>
+              </div>
+            </button>
+          </div>
+        )}
+
         {/* ================= ORDERS (ORDER MANAGER ONLY) ================= */}
         {(adminRole === "RECIPE_MANAGER") && (
           <div className="mt-8">

@@ -25,6 +25,8 @@ import ClientInventory from "./pages/ClientInventory";
 import AddTrialRecipe from "./pages/AddTrialRecipe";
 import AddTrainingRecipe from "./pages/AddTrainingRecipe";
 import GoogleSuccess from "./pages/GoogleSuccess";
+import ProjectionForm from "./pages/ProjectionForm";
+import ProjectionReview from "./pages/admin/ProjectionReview";
 function App() {
   return (
     <Router
@@ -61,6 +63,8 @@ function App() {
         <Route path="/add-training-recipe" element={<AddTrainingRecipe />}/>
         <Route path="/client-inventory" element={<ClientInventory />}/>
         <Route path="/google-success" element={<GoogleSuccess />}/>
+        <Route path="/projection" element={<ProjectionForm />}/>
+        <Route path="/admin/projection/:brandId" element={<ProjectionReview />}/>
       </Routes>
     </Router>
   )

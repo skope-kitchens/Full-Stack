@@ -302,6 +302,9 @@ const AdminDashboard = () => {
           />
         )}
 
+        {/* Warehouse Dispatch Queue — visible to Ingredient Manager only */}
+        {isIngredientManager && <WarehouseDispatchSection />}
+
         {/* Recipe update modal only for recipe managers */}
         {isRecipeManager && showRecipesModal && (
           <RecipesModal onClose={() => setShowRecipesModal(false)} />
@@ -3395,6 +3398,157 @@ function StockUpdateModal({ onClose }) {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+/* ---------- WAREHOUSE DISPATCH QUEUE SECTION (Ingredient Manager) ---------- */
+function WarehouseDispatchSection() {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [dispatchingId, setDispatchingId] = useState(null);
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const res = await api.get("/api/production-orders/ready-for-dispatch");
+        setOrders(res.data?.data || []);
+      } catch (err) {
+        console.error("Failed to load dispatch queue", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchOrders();
+  }, []);
+
+  const handleDispatch = async (orderId) => {
+    try {
+      setDispatchingId(orderId);
+      await api.patch(`/api/production-orders/${orderId}/dispatch`);
+      setOrders((prev) => prev.filter((o) => o._id !== orderId));
+      toast.success("Cargo dispatched — production order is now IN_PREPARATION.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Dispatch failed. Please try again.");
+    } finally {
+      setDispatchingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="mt-8">
+        <h2 className="text-xl font-bold mb-4">Warehouse Dispatch Queue</h2>
+        <p className="text-gray-500 text-sm">Loading dispatch queue...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-3 mb-4">
+        <h2 className="text-xl font-bold">Warehouse Dispatch Queue</h2>
+        {orders.length > 0 && (
+          <span className="text-sm font-semibold bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full">
+            {orders.length} pending
+          </span>
+        )}
+      </div>
+
+      {orders.length === 0 ? (
+        <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
+          <p className="font-medium text-gray-600">No orders awaiting dispatch</p>
+          <p className="text-sm text-gray-400 mt-1">
+            Production orders approved for dispatch will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {orders.map((order) => (
+            <div
+              key={order._id}
+              className="bg-white border-2 border-gray-200 rounded-xl p-6 shadow-sm"
+            >
+              {/* Card header */}
+              <div className="flex items-start justify-between mb-5">
+                <div>
+                  <h3 className="text-lg font-bold">{order.brandName}</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Order #{order._id.toString().slice(-6).toUpperCase()} &middot; Created{" "}
+                    {new Date(order.createdAt).toLocaleDateString("en-IN", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </p>
+                  <p className="text-sm font-semibold text-green-700 mt-1">
+                    Payment Confirmed &mdash; ₹
+                    {Number(order.financials?.totalIngredientCost || 0).toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDispatch(order._id)}
+                  disabled={dispatchingId === order._id}
+                  className="bg-black text-white px-5 py-2.5 rounded-lg font-bold text-sm hover:bg-gray-800 transition disabled:opacity-50 whitespace-nowrap"
+                >
+                  {dispatchingId === order._id
+                    ? "Dispatching..."
+                    : "Confirm & Dispatch Cargo Crate"}
+                </button>
+              </div>
+
+              {/* Ingredient cargo table */}
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-semibold text-gray-700">
+                        Item Name
+                      </th>
+                      <th className="px-4 py-2.5 text-right font-semibold text-gray-700">
+                        Required Qty
+                      </th>
+                      <th className="px-4 py-2.5 text-left font-semibold text-gray-700">
+                        UOM
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(order.warehouseIngredientsToDispatch || []).length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="px-4 py-4 text-center text-gray-400 text-xs"
+                        >
+                          No warehouse ingredients listed for this order.
+                        </td>
+                      </tr>
+                    ) : (
+                      (order.warehouseIngredientsToDispatch || []).map((item, idx) => (
+                        <tr
+                          key={idx}
+                          className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                        >
+                          <td className="px-4 py-2.5 font-medium">{item.itemName}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">
+                            {Number(item.requiredQty || 0).toFixed(3)}
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-600 uppercase text-xs">
+                            {item.uom || "—"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

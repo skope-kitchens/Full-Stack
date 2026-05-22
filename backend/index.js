@@ -39,6 +39,8 @@ import creditNoteRoutes from "./routes/creditNote.routes.js";
 import menuEntryRoutes from "./routes/menuEntry.routes.js";
 import brandStockRoutes from "./routes/brandStock.routes.js";
 import stockUpdateRoutes from "./routes/stockUpdate.routes.js";
+import projectionRoutes from "./routes/projection.routes.js";
+import productionOrderRoutes from "./routes/productionOrder.routes.js";
 
 dotenv.config()
 validateEnv();
@@ -126,6 +128,8 @@ app.use("/api", menuEntryRoutes);
 app.use("/api", brandStockRoutes);
 app.use("/api", stockUpdateRoutes);
 app.use("/api/google", googleRoutes);
+app.use("/api/projections", projectionRoutes);
+app.use("/api/production-orders", productionOrderRoutes);
 
 // WALLET_MANAGER only — will become SUPER_ADMIN when that role is introduced.
 app.get("/debug/db", authMiddleware, requireRole("WALLET_MANAGER"), async (req, res) => {

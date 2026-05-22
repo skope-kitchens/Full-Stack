@@ -50,11 +50,11 @@ const BrandList = ({ onSelectBrand, canManage = true }) => {
             if (!canManage || !onSelectBrand) return;
             onSelectBrand(brand);
 
-            // 🔕 clear dot locally once admin opens brand
+            // Clear all local notification dots once admin opens the brand
             setBrands((prev) =>
               prev.map((b) =>
                 b._id === brand._id
-                  ? { ...b, hasNewOrder: false }
+                  ? { ...b, hasNewOrder: false, hasNewMenu: false, hasPendingProjection: false }
                   : b
               )
             );
@@ -78,6 +78,14 @@ const BrandList = ({ onSelectBrand, canManage = true }) => {
               {/* 🔵 NEW MENU DOT */}
               {!brand.hasNewOrder && brand.hasNewMenu && (
                 <span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-200" />
+              )}
+
+              {/* 🔴 PENDING PROJECTION DOT — pulsing to draw chef's eye */}
+              {brand.hasPendingProjection && (
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"
+                  title="Pending projection awaiting review"
+                />
               )}
             </div>
 

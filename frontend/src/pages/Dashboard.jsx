@@ -66,6 +66,9 @@ export default function Dashboard() {
   const [menuSaving, setMenuSaving] = useState(false);
   const [showClientMenu, setShowClientMenu] = useState(false);
 
+  const [productionOrders, setProductionOrders] = useState([]);
+  const [payingOrderId, setPayingOrderId] = useState(null);
+
 
   /* ---------------- TOKEN ---------------- */
   function getTokenSafely() {
@@ -238,6 +241,47 @@ export default function Dashboard() {
     const interval = setInterval(fetchOrders, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  /* ---------------- PRODUCTION ORDERS (awaiting payment) ---------------- */
+  useEffect(() => {
+    const fetchProductionOrders = async () => {
+      try {
+        const res = await api.get("/api/production-orders/my-pending");
+        setProductionOrders(res.data?.data || []);
+      } catch (err) {
+        console.error("Failed to load production orders", err);
+      }
+    };
+    fetchProductionOrders();
+  }, []);
+
+  const payProductionInvoice = async (orderId, cost) => {
+    try {
+      setPayingOrderId(orderId);
+      const res = await api.post(`/api/production-orders/${orderId}/pay`);
+
+      // Refresh wallet balance
+      const walletRes = await api.get("/api/wallet");
+      const walletData = {
+        balance: walletRes.data.balance ?? 0,
+        dueAmount: walletRes.data.dueAmount ?? 0,
+        dueReason: walletRes.data.dueReason ?? null,
+        transactions: walletRes.data.transactions ?? [],
+      };
+      setWallet(walletData);
+      setTransactions(walletData.transactions);
+
+      // Remove the paid order from banner
+      setProductionOrders((prev) => prev.filter((o) => o._id !== orderId));
+
+      toast.success(`Production invoice paid — ₹${formatMoney(cost)} deducted from wallet.`);
+    } catch (err) {
+      const message = err.response?.data?.message || "Payment failed. Please try again.";
+      toast.error(message);
+    } finally {
+      setPayingOrderId(null);
+    }
+  };
 
   const markAsReceived = async (orderId) => {
     try {
@@ -469,7 +513,7 @@ export default function Dashboard() {
                         type="button"
                         onClick={() => {
                           setShowClientMenu(false);
-                          navigate("/order");
+                          navigate("/projection");
                         }}
                         className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
                       >
@@ -547,6 +591,35 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+
+            {/* ---------------- PRODUCTION INVOICE BANNERS ---------------- */}
+            {productionOrders.map((po) => (
+              <div
+                key={po._id}
+                className="bg-amber-50 border border-amber-300 text-amber-900 p-4 rounded-lg mb-4 mt-2"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="font-semibold">
+                      Production Invoice Ready — ₹{formatMoney(po.financials?.totalIngredientCost)}
+                    </p>
+                    <p className="text-sm mt-1">
+                      Your production run has been approved by Skope Kitchen. Payment is required before
+                      ingredients are dispatched and preparation begins.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() =>
+                      payProductionInvoice(po._id, po.financials?.totalIngredientCost)
+                    }
+                    disabled={payingOrderId === po._id}
+                    className="ml-4 bg-amber-600 hover:bg-amber-700 text-white px-6 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap disabled:opacity-50"
+                  >
+                    {payingOrderId === po._id ? "Processing..." : "Pay Production Invoice"}
+                  </button>
+                </div>
+              </div>
+            ))}
 
             {/* ---------------- SERVICE CHECKLIST ---------------- */}
             <section className="bg-white mt-10 rounded-2xl p-8 shadow space-y-6">
