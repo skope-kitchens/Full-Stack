@@ -253,6 +253,9 @@ export default function Dashboard() {
       }
     };
     fetchProductionOrders();
+    // Poll every 30 s so a new invoice raised while the brand is on-screen appears automatically
+    const interval = setInterval(fetchProductionOrders, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const payProductionInvoice = async (orderId, cost) => {
@@ -593,33 +596,139 @@ export default function Dashboard() {
             )}
 
             {/* ---------------- PRODUCTION INVOICE BANNERS ---------------- */}
-            {productionOrders.map((po) => (
-              <div
-                key={po._id}
-                className="bg-amber-50 border border-amber-300 text-amber-900 p-4 rounded-lg mb-4 mt-2"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="font-semibold">
-                      Production Invoice Ready — ₹{formatMoney(po.financials?.totalIngredientCost)}
-                    </p>
-                    <p className="text-sm mt-1">
-                      Your production run has been approved by Skope Kitchen. Payment is required before
-                      ingredients are dispatched and preparation begins.
-                    </p>
+            {productionOrders.map((po) => {
+              const invoiceCost = Number(po.financials?.totalIngredientCost || 0);
+              const walletBalance = Number(wallet?.balance || 0);
+              const hasSufficientFunds = walletBalance >= invoiceCost;
+              const isPaying = payingOrderId === po._id;
+
+              return (
+                <div
+                  key={po._id}
+                  className="mt-4 rounded-2xl border-2 border-amber-400 bg-amber-50 shadow-sm overflow-hidden"
+                >
+                  {/* Card header */}
+                  <div className="flex items-center justify-between px-5 py-3 bg-amber-100 border-b border-amber-300">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                      <span className="font-bold text-amber-900 text-sm uppercase tracking-wide">
+                        Production Invoice Ready for Payment
+                      </span>
+                    </div>
+                    <span className="text-xs text-amber-700 font-mono">
+                      Ref #{po._id.toString().slice(-6).toUpperCase()}
+                    </span>
                   </div>
-                  <button
-                    onClick={() =>
-                      payProductionInvoice(po._id, po.financials?.totalIngredientCost)
-                    }
-                    disabled={payingOrderId === po._id}
-                    className="ml-4 bg-amber-600 hover:bg-amber-700 text-white px-6 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap disabled:opacity-50"
-                  >
-                    {payingOrderId === po._id ? "Processing..." : "Pay Production Invoice"}
-                  </button>
+
+                  <div className="px-5 py-4 space-y-4">
+                    {/* Description */}
+                    <p className="text-sm text-amber-800">
+                      Skope Kitchen has approved your production run. Pay the ingredient invoice below
+                      to release the cargo and begin preparation.
+                    </p>
+
+                    {/* Ingredient breakdown table */}
+                    {(po.warehouseIngredientsToDispatch || []).length > 0 && (
+                      <div className="rounded-lg overflow-hidden border border-amber-200">
+                        <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
+                          <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+                            Ingredients in this Order
+                          </span>
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead className="bg-white border-b border-amber-100">
+                            <tr>
+                              <th className="px-4 py-2 text-left font-semibold text-gray-600">Item</th>
+                              <th className="px-4 py-2 text-right font-semibold text-gray-600">Qty</th>
+                              <th className="px-4 py-2 text-left font-semibold text-gray-600">UOM</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {po.warehouseIngredientsToDispatch.map((item, idx) => (
+                              <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-amber-50"}>
+                                <td className="px-4 py-2 font-medium text-gray-800">{item.itemName}</td>
+                                <td className="px-4 py-2 text-right tabular-nums text-gray-700">
+                                  {Number(item.requiredQty || 0).toFixed(3)}
+                                </td>
+                                <td className="px-4 py-2 text-gray-500 uppercase text-xs">
+                                  {item.uom || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Sub-recipes being prepared */}
+                    {(po.subRecipesToPrepare || []).length > 0 && (
+                      <div className="rounded-lg overflow-hidden border border-amber-200">
+                        <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
+                          <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+                            Preparation Schedule
+                          </span>
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead className="bg-white border-b border-amber-100">
+                            <tr>
+                              <th className="px-4 py-2 text-left font-semibold text-gray-600">Sub-Recipe</th>
+                              <th className="px-4 py-2 text-right font-semibold text-gray-600">Batches</th>
+                              <th className="px-4 py-2 text-left font-semibold text-gray-600">UOM</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {po.subRecipesToPrepare.map((item, idx) => (
+                              <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-amber-50"}>
+                                <td className="px-4 py-2 font-medium text-gray-800">{item.subRecipeName}</td>
+                                <td className="px-4 py-2 text-right tabular-nums text-gray-700">
+                                  {item.batchesToPrepare}
+                                </td>
+                                <td className="px-4 py-2 text-gray-500 uppercase text-xs">
+                                  {item.uom || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Cost vs wallet balance row + pay button */}
+                    <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-6 text-sm">
+                          <div>
+                            <span className="text-gray-500">Invoice Total</span>
+                            <p className="font-bold text-xl text-amber-900">
+                              ₹{formatMoney(invoiceCost)}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Wallet Balance</span>
+                            <p className={`font-bold text-xl ${hasSufficientFunds ? "text-green-700" : "text-red-600"}`}>
+                              ₹{formatMoney(walletBalance)}
+                            </p>
+                          </div>
+                        </div>
+                        {!hasSufficientFunds && (
+                          <p className="text-xs text-red-600 font-medium">
+                            Insufficient wallet balance — please recharge ₹{formatMoney(invoiceCost - walletBalance)} more to pay this invoice.
+                          </p>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => payProductionInvoice(po._id, invoiceCost)}
+                        disabled={isPaying || !hasSufficientFunds}
+                        className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold text-sm transition-colors whitespace-nowrap shadow"
+                      >
+                        {isPaying ? "Processing…" : hasSufficientFunds ? "Pay Production Invoice" : "Insufficient Balance"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {/* ---------------- SERVICE CHECKLIST ---------------- */}
             <section className="bg-white mt-10 rounded-2xl p-8 shadow space-y-6">

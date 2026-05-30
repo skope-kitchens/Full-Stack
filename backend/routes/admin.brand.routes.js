@@ -10,6 +10,7 @@ import Order from "../models/order.js";
 import IngredientIndent from "../models/ingredientIndent.js";
 import MenuEntry from "../models/menuEntry.js";
 import Projection from "../models/projection.js";
+import ProductionOrder from "../models/productionOrder.js";
 import {
   extractIngredientsFromBOM,
   aggregateIngredients,
@@ -71,13 +72,15 @@ router.get(
         .lean();
 
       // 2️⃣ Run all signal queries in parallel — avoids serial round-trips
-      const [unseenOrders, unseenMenus, pendingProjections] = await Promise.all([
+      const [unseenOrders, unseenMenus, pendingProjections, pendingPaymentOrders, dispatchReadyOrders] = await Promise.all([
         Order.find({ isSeenByAdmin: false }).select("brand").lean(),
         MenuEntry.find({ isSeenByRecipeAdmin: false }).select("clientId").lean(),
         Projection.find({ status: "PENDING_CHEF_REVIEW" }).select("brandId").lean(),
+        ProductionOrder.find({ status: "AWAITING_BRAND_PAYMENT" }).select("brandId").lean(),
+        ProductionOrder.find({ status: "READY_FOR_DISPATCH" }).select("brandId").lean(),
       ]);
 
-      // 3️⃣ Build O(1) lookup sets from the three signal arrays
+      // 3️⃣ Build O(1) lookup sets from the five signal arrays
       const brandIdsWithOrders = new Set(
         unseenOrders.map(o => o.brand.toString())
       );
@@ -87,6 +90,12 @@ router.get(
       const brandIdsWithProjections = new Set(
         pendingProjections.map(p => p.brandId.toString())
       );
+      const brandIdsAwaitingPayment = new Set(
+        pendingPaymentOrders.map(p => p.brandId.toString())
+      );
+      const brandIdsDispatchReady = new Set(
+        dispatchReadyOrders.map(p => p.brandId.toString())
+      );
 
       // 4️⃣ Attach per-brand signal flags
       const result = brands.map(brand => ({
@@ -94,6 +103,8 @@ router.get(
         hasNewOrder: brandIdsWithOrders.has(brand._id.toString()),
         hasNewMenu: brandIdsWithMenus.has(brand._id.toString()),
         hasPendingProjection: brandIdsWithProjections.has(brand._id.toString()),
+        hasPendingPayment: brandIdsAwaitingPayment.has(brand._id.toString()),
+        hasDispatchReady: brandIdsDispatchReady.has(brand._id.toString()),
       }));
 
       res.json(result);

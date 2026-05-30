@@ -328,15 +328,15 @@ export default function ProjectionReview() {
         warehouseIngredientsToDispatch,
       });
 
-      // Capture the created ProductionOrder ID so we can poll its status
-      const poId = res.data?.data?.productionOrder?._id;
-      if (poId) {
-        setProductionOrderId(poId);
-        setOrderStatus("PENDING_INDENT_APPROVAL");
+      // Capture the created ProductionOrder ID and its actual initial status
+      const po = res.data?.data?.productionOrder;
+      if (po?._id) {
+        setProductionOrderId(po._id);
+        setOrderStatus(po.status || "AWAITING_BRAND_PAYMENT");
       }
 
-      toast.success("Indent request submitted — awaiting Wallet Admin approval");
-      // Stay on page — polling will unlock Mark Preparation when dispatched
+      toast.success("Indent confirmed — production invoice sent to brand for payment");
+      // Stay on page — polling will unlock Mark Preparation once ingredients are dispatched
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to submit indent request");
     } finally {
@@ -538,40 +538,63 @@ export default function ProjectionReview() {
           })}
 
           {/* Production order status tracker — visible after indent is submitted */}
-          {productionOrderId && (
-            <div className={`rounded-xl border p-4 ${
-              orderStatus === "IN_PREPARATION"
-                ? "bg-green-50 border-green-300"
-                : "bg-blue-50 border-blue-200"
-            }`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`font-semibold text-sm ${
-                    orderStatus === "IN_PREPARATION" ? "text-green-800" : "text-blue-800"
-                  }`}>
-                    {orderStatus === "IN_PREPARATION"
-                      ? "Ingredients dispatched — kitchen is ready to prepare"
-                      : "Indent submitted — tracking production order status"}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Status: {orderStatus?.replace(/_/g, " ")}
-                    {orderStatus !== "IN_PREPARATION" && " · Polling every 5 s…"}
-                  </p>
+          {productionOrderId && (() => {
+            const statusConfig = {
+              AWAITING_BRAND_PAYMENT: {
+                bg: "bg-amber-50 border-amber-300",
+                textColor: "text-amber-800",
+                dotColor: "bg-amber-500",
+                headline: "Invoice sent — awaiting brand payment",
+                sub: "The brand client will see a payment prompt on their dashboard.",
+              },
+              READY_FOR_DISPATCH: {
+                bg: "bg-blue-50 border-blue-200",
+                textColor: "text-blue-800",
+                dotColor: "bg-blue-500",
+                headline: "Payment confirmed — warehouse is preparing the cargo crate",
+                sub: "Ingredient Manager will dispatch the crate to the kitchen shortly.",
+              },
+              IN_PREPARATION: {
+                bg: "bg-green-50 border-green-300",
+                textColor: "text-green-800",
+                dotColor: null,
+                headline: "Ingredients dispatched — kitchen is ready to prepare",
+                sub: "Click Mark Preparation below once the batch is cooked.",
+              },
+            };
+            const cfg = statusConfig[orderStatus] || {
+              bg: "bg-gray-50 border-gray-200",
+              textColor: "text-gray-700",
+              dotColor: "bg-gray-400",
+              headline: "Tracking production order…",
+              sub: `Current status: ${orderStatus?.replace(/_/g, " ")}`,
+            };
+            return (
+              <div className={`rounded-xl border p-4 ${cfg.bg}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`font-semibold text-sm ${cfg.textColor}`}>{cfg.headline}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {cfg.sub}
+                      {orderStatus !== "IN_PREPARATION" && " · Polling every 5 s…"}
+                    </p>
+                  </div>
+                  {cfg.dotColor && (
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${cfg.dotColor} animate-pulse shrink-0`} />
+                  )}
                 </div>
-                {orderStatus !== "IN_PREPARATION" && (
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
-                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Bottom action row */}
           {!loadingCalc && requirements.length > 0 && (
             <div className="bg-white rounded-2xl border shadow-sm px-5 py-4 flex items-center justify-between gap-4">
               <p className="text-sm text-gray-500">
-                {productionOrderId
-                  ? "Indent raised. Mark Preparation unlocks once ingredients are dispatched."
-                  : "Review the requirements above, then confirm to raise a warehouse indent."}
+                {!productionOrderId && "Review the requirements above, then confirm to send the production invoice."}
+                {productionOrderId && orderStatus === "AWAITING_BRAND_PAYMENT" && "Invoice sent. Mark Preparation unlocks once the brand pays and cargo is dispatched."}
+                {productionOrderId && orderStatus === "READY_FOR_DISPATCH" && "Brand paid. Warehouse is dispatching the cargo crate — Mark Preparation unlocks shortly."}
+                {productionOrderId && orderStatus === "IN_PREPARATION" && "Cargo arrived. Click Mark Preparation when the batch is cooked."}
               </p>
               <div className="flex items-center gap-3 shrink-0">
 
@@ -590,11 +613,12 @@ export default function ProjectionReview() {
                     {completing ? "Completing…" : "Mark Preparation"}
                   </button>
                   {orderStatus !== "IN_PREPARATION" && (
-                    <div className="absolute bottom-full right-0 mb-2 w-64 hidden group-hover:block z-10">
+                    <div className="absolute bottom-full right-0 mb-2 w-72 hidden group-hover:block z-10">
                       <div className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg text-center leading-relaxed">
-                        {productionOrderId
-                          ? `Waiting for dispatch — ${orderStatus?.replace(/_/g, " ")}`
-                          : "Locked — Awaiting payment approval and warehouse ingredient dispatch"}
+                        {!productionOrderId && "Confirm the indent first to raise a production invoice"}
+                        {productionOrderId && orderStatus === "AWAITING_BRAND_PAYMENT" && "Waiting for brand to pay the invoice"}
+                        {productionOrderId && orderStatus === "READY_FOR_DISPATCH" && "Brand paid — waiting for warehouse to dispatch cargo"}
+                        {productionOrderId && !["AWAITING_BRAND_PAYMENT", "READY_FOR_DISPATCH", "IN_PREPARATION"].includes(orderStatus) && `Status: ${orderStatus?.replace(/_/g, " ")}`}
                         <div className="absolute top-full right-4 border-4 border-transparent border-t-gray-800" />
                       </div>
                     </div>

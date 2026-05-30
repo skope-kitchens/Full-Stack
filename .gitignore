@@ -9,10 +9,28 @@ build/
 frontend/dist/
 backend/dist/
 
-# env
+# env — never commit any .env variant
 .env
+.env.local
+.env.development
+.env.development.local
+.env.production
+.env.production.local
+.env.test
+.env.test.local
 frontend/.env
+frontend/.env.local
+frontend/.env.development
+frontend/.env.development.local
+frontend/.env.production
+frontend/.env.production.local
+frontend/.env.test
 backend/.env
+backend/.env.local
+backend/.env.development
+backend/.env.development.local
+backend/.env.production
+backend/.env.production.local
 
 # logs
 npm-debug.log*

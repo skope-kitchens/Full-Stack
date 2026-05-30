@@ -54,7 +54,7 @@ const BrandList = ({ onSelectBrand, canManage = true }) => {
             setBrands((prev) =>
               prev.map((b) =>
                 b._id === brand._id
-                  ? { ...b, hasNewOrder: false, hasNewMenu: false, hasPendingProjection: false }
+                  ? { ...b, hasNewOrder: false, hasNewMenu: false, hasPendingProjection: false, hasPendingPayment: false, hasDispatchReady: false }
                   : b
               )
             );
@@ -85,6 +85,22 @@ const BrandList = ({ onSelectBrand, canManage = true }) => {
                 <span
                   className="inline-block w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"
                   title="Pending projection awaiting review"
+                />
+              )}
+
+              {/* 🟠 AWAITING PAYMENT DOT — indent raised, client hasn't paid yet */}
+              {brand.hasPendingPayment && (
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"
+                  title="Production invoice sent — awaiting brand payment"
+                />
+              )}
+
+              {/* 🔴 DISPATCH READY DOT — brand paid, cargo crate awaiting warehouse release */}
+              {brand.hasDispatchReady && (
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"
+                  title="Brand paid — cargo crate ready to dispatch"
                 />
               )}
             </div>

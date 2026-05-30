@@ -19,8 +19,19 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
   const [showRecipesOrderId, setShowRecipesOrderId] = useState(null);
   const [recipeBreakdowns, setRecipeBreakdowns] = useState({});
 
+  // Ingredient Manager — per-brand dispatch orders
+  const [dispatchOrders, setDispatchOrders] = useState([]);
+  const [loadingDispatch, setLoadingDispatch] = useState(false);
+  const [dispatchingId, setDispatchingId] = useState(null);
+
+  // Recipe Manager — per-brand active kitchen production orders
+  const [kitchenOrders, setKitchenOrders] = useState([]);
+  const [loadingKitchen, setLoadingKitchen] = useState(false);
+  const [kitchenActionId, setKitchenActionId] = useState(null);
+
   const isWalletManager = adminRole === "WALLET_MANAGER";
   const isRecipeAdmin = adminRole === "RECIPE_MANAGER";
+  const isIngredientManager = adminRole === "INGREDIENT_MANAGER";
   /* ================= FETCH ORDERS (ORDER MANAGER ONLY) ================= */
   useEffect(() => {
     if (!brand?._id || !isRecipeAdmin) return;
@@ -66,6 +77,34 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
     setRecipeBreakdowns({});
   }, [brand?._id]);
 
+  /* ================= FETCH DISPATCH ORDERS (INGREDIENT MANAGER ONLY) ================= */
+  useEffect(() => {
+    if (!brand?._id || !isIngredientManager) return;
+    let cancelled = false;
+
+    const fetchDispatchOrders = async () => {
+      setLoadingDispatch(true);
+      try {
+        const res = await api.get("/api/production-orders/ready-for-dispatch");
+        if (!cancelled) {
+          const all = res.data?.data || [];
+          setDispatchOrders(all.filter((o) => o.brandId?.toString() === brand._id.toString()));
+        }
+      } catch (err) {
+        console.error("Failed to fetch dispatch orders", err);
+      } finally {
+        if (!cancelled) setLoadingDispatch(false);
+      }
+    };
+
+    fetchDispatchOrders();
+    const interval = setInterval(fetchDispatchOrders, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [brand?._id, isIngredientManager]);
+
   const fetchBreakdownFor = async (key, dishName) => {
     setRecipeBreakdowns((prev) => {
       if (prev[key]) return prev;
@@ -109,6 +148,77 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
       );
     } catch (err) {
       toast.error("Failed to update order status");
+    }
+  };
+
+  /* ================= FETCH KITCHEN ORDERS (RECIPE MANAGER ONLY) ================= */
+  useEffect(() => {
+    if (!brand?._id || !isRecipeAdmin) return;
+    let cancelled = false;
+
+    const fetchKitchenOrders = async () => {
+      setLoadingKitchen(true);
+      try {
+        const res = await api.get("/api/production-orders/active");
+        if (!cancelled) {
+          const all = res.data?.data || [];
+          setKitchenOrders(all.filter((o) => o.brandId?.toString() === brand._id.toString()));
+        }
+      } catch (err) {
+        console.error("Failed to fetch kitchen orders", err);
+      } finally {
+        if (!cancelled) setLoadingKitchen(false);
+      }
+    };
+
+    fetchKitchenOrders();
+    const interval = setInterval(fetchKitchenOrders, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [brand?._id, isRecipeAdmin]);
+
+  /* ================= DISPATCH CARGO (INGREDIENT MANAGER ONLY) ================= */
+  const handleDispatch = async (orderId) => {
+    try {
+      setDispatchingId(orderId);
+      await api.patch(`/api/production-orders/${orderId}/dispatch`);
+      setDispatchOrders((prev) => prev.filter((o) => o._id !== orderId));
+      toast.success("Cargo dispatched — production order is now IN_PREPARATION.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Dispatch failed. Please try again.");
+    } finally {
+      setDispatchingId(null);
+    }
+  };
+
+  /* ================= KITCHEN ACTIONS (RECIPE MANAGER ONLY) ================= */
+  const handleMarkStarted = async (orderId) => {
+    try {
+      setKitchenActionId(orderId);
+      await api.patch(`/api/production-orders/${orderId}/mark-started`);
+      toast.success("Preparation started — warehouse stock deducted.");
+      setKitchenOrders((prev) =>
+        prev.map((o) => o._id === orderId ? { ...o, status: "IN_PREPARATION" } : o)
+      );
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to mark preparation as started.");
+    } finally {
+      setKitchenActionId(null);
+    }
+  };
+
+  const handleMarkComplete = async (orderId) => {
+    try {
+      setKitchenActionId(orderId);
+      await api.patch(`/api/production-orders/${orderId}/complete`);
+      toast.success("Batch complete — kitchen fridge stock updated.");
+      setKitchenOrders((prev) => prev.filter((o) => o._id !== orderId));
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to complete batch preparation.");
+    } finally {
+      setKitchenActionId(null);
     }
   };
 
@@ -208,6 +318,117 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
           </div>
         )}
 
+        {/* ================= CARGO DISPATCH (INGREDIENT MANAGER ONLY) ================= */}
+        {isIngredientManager && (
+          <div className="mt-6">
+            <h3 className="text-base font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              Warehouse Dispatch
+              {dispatchOrders.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                  {dispatchOrders.length} ready
+                </span>
+              )}
+            </h3>
+
+            {loadingDispatch ? (
+              <p className="text-sm text-gray-400">Loading dispatch orders...</p>
+            ) : dispatchOrders.length === 0 ? (
+              <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center">
+                <p className="text-sm font-medium text-gray-500">No orders awaiting dispatch</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Orders appear here once the brand confirms payment.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {dispatchOrders.map((order) => (
+                  <div
+                    key={order._id}
+                    className="border-2 border-red-200 bg-red-50 rounded-xl p-4"
+                  >
+                    {/* Order meta */}
+                    <div className="mb-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-red-700 uppercase tracking-wide">
+                          Cargo Crate Ready
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          #{order._id.toString().slice(-6).toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-green-700">
+                        Payment confirmed &mdash; ₹
+                        {Number(order.financials?.totalIngredientCost || 0).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(order.createdAt).toLocaleDateString("en-IN", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </p>
+                    </div>
+
+                    {/* Cargo crate items table */}
+                    <div className="border rounded-lg overflow-hidden mb-4 bg-white">
+                      <div className="bg-gray-50 border-b px-3 py-1.5">
+                        <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                          Cargo Crate — Items to Dispatch
+                        </span>
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 border-b">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold text-gray-700">Ingredient</th>
+                            <th className="px-3 py-2 text-right font-semibold text-gray-700">Qty</th>
+                            <th className="px-3 py-2 text-left font-semibold text-gray-700">UOM</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(order.warehouseIngredientsToDispatch || []).length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="px-3 py-3 text-center text-xs text-gray-400">
+                                No ingredients listed.
+                              </td>
+                            </tr>
+                          ) : (
+                            order.warehouseIngredientsToDispatch.map((item, idx) => (
+                              <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                                <td className="px-3 py-2 font-medium">{item.itemName}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">
+                                  {Number(item.requiredQty || 0).toFixed(3)}
+                                </td>
+                                <td className="px-3 py-2 text-gray-500 uppercase text-xs">
+                                  {item.uom || "—"}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Dispatch button */}
+                    <button
+                      type="button"
+                      onClick={() => handleDispatch(order._id)}
+                      disabled={dispatchingId === order._id}
+                      className="w-full bg-black text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-800 transition disabled:opacity-50"
+                    >
+                      {dispatchingId === order._id
+                        ? "Dispatching..."
+                        : "Confirm & Dispatch Cargo Crate"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ================= PROJECTION ALERT (RECIPE MANAGER ONLY) ================= */}
         {isRecipeAdmin && (
           <div className="mt-6">
@@ -247,6 +468,145 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
                 <span className="text-gray-400 text-sm">›</span>
               </div>
             </button>
+          </div>
+        )}
+
+        {/* ================= ACTIVE KITCHEN LINE (RECIPE MANAGER ONLY) ================= */}
+        {isRecipeAdmin && (
+          <div className="mt-6">
+            <h3 className="text-base font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              Active Kitchen Line
+              {kitchenOrders.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+                  {kitchenOrders.length} active
+                </span>
+              )}
+            </h3>
+
+            {loadingKitchen ? (
+              <p className="text-sm text-gray-400">Loading kitchen orders...</p>
+            ) : kitchenOrders.length === 0 ? (
+              <div className="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center">
+                <p className="text-sm font-medium text-gray-500">No active kitchen orders</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Orders dispatched from the warehouse will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {kitchenOrders.map((order) => {
+                  const isReady = order.status === "READY_FOR_DISPATCH";
+                  const isInPrep = order.status === "IN_PREPARATION";
+                  return (
+                    <div
+                      key={order._id}
+                      className={`border-2 rounded-xl p-4 ${
+                        isInPrep
+                          ? "border-orange-200 bg-orange-50"
+                          : "border-amber-200 bg-amber-50"
+                      }`}
+                    >
+                      {/* Order meta */}
+                      <div className="flex items-center justify-between mb-3">
+                        <span
+                          className={`text-xs font-semibold uppercase tracking-wide ${
+                            isInPrep ? "text-orange-700" : "text-amber-700"
+                          }`}
+                        >
+                          {isInPrep ? "In Preparation" : "Cargo Arrived — Ready to Start"}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          #{order._id.toString().slice(-6).toUpperCase()}
+                        </span>
+                      </div>
+
+                      {/* Sub-recipes to prepare */}
+                      {(order.subRecipesToPrepare || []).length > 0 && (
+                        <div className="border rounded-lg overflow-hidden mb-3 bg-white">
+                          <div className="bg-gray-50 border-b px-3 py-1.5">
+                            <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                              Sub-Recipes to Prepare
+                            </span>
+                          </div>
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 border-b">
+                              <tr>
+                                <th className="px-3 py-2 text-left font-semibold text-gray-700">Sub-Recipe</th>
+                                <th className="px-3 py-2 text-right font-semibold text-gray-700">Batches</th>
+                                <th className="px-3 py-2 text-left font-semibold text-gray-700">UOM</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {order.subRecipesToPrepare.map((item, idx) => (
+                                <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                                  <td className="px-3 py-2 font-medium">{item.subRecipeName}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">{item.batchesToPrepare}</td>
+                                  <td className="px-3 py-2 text-gray-500 uppercase text-xs">{item.uom || "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Warehouse ingredients */}
+                      {(order.warehouseIngredientsToDispatch || []).length > 0 && (
+                        <div className="border rounded-lg overflow-hidden mb-4 bg-white">
+                          <div className="bg-gray-50 border-b px-3 py-1.5">
+                            <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                              Warehouse Ingredients
+                            </span>
+                          </div>
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 border-b">
+                              <tr>
+                                <th className="px-3 py-2 text-left font-semibold text-gray-700">Ingredient</th>
+                                <th className="px-3 py-2 text-right font-semibold text-gray-700">Qty</th>
+                                <th className="px-3 py-2 text-left font-semibold text-gray-700">UOM</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {order.warehouseIngredientsToDispatch.map((item, idx) => (
+                                <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                                  <td className="px-3 py-2 font-medium">{item.itemName}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums">
+                                    {Number(item.requiredQty || 0).toFixed(3)}
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-500 uppercase text-xs">{item.uom || "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Action button */}
+                      {isReady && (
+                        <button
+                          type="button"
+                          onClick={() => handleMarkStarted(order._id)}
+                          disabled={kitchenActionId === order._id}
+                          className="w-full bg-black text-white py-3 rounded-xl font-bold text-sm hover:bg-gray-800 transition disabled:opacity-50"
+                        >
+                          {kitchenActionId === order._id ? "Starting..." : "Mark Preparation Started"}
+                        </button>
+                      )}
+                      {isInPrep && (
+                        <button
+                          type="button"
+                          onClick={() => handleMarkComplete(order._id)}
+                          disabled={kitchenActionId === order._id}
+                          className="w-full bg-green-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-green-700 transition disabled:opacity-50"
+                        >
+                          {kitchenActionId === order._id ? "Completing..." : "Mark Preparation Complete"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 

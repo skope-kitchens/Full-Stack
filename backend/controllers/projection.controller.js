@@ -371,12 +371,14 @@ export const convertProjectionToProductionOrder = async (req, res) => {
     await projection.save();
 
     // ── 5. Create the production order ────────────────────────────────────────
+    // Chef confirmation is the approval — skip PENDING_INDENT_APPROVAL entirely
+    // so the brand client can pay their invoice immediately.
     const productionOrder = await ProductionOrder.create({
       projectionId: projection._id,
       brandId: projection.brandId,
       brandName: projection.brandName,
       scaledTargetQty: Number(scaledTargetQty || 0),
-      status: "PENDING_INDENT_APPROVAL",
+      status: "AWAITING_BRAND_PAYMENT",
       financials: {
         totalIngredientCost: Number(totalIngredientCost.toFixed(2)),
         paymentStatus: "UNPAID",
@@ -391,7 +393,7 @@ export const convertProjectionToProductionOrder = async (req, res) => {
     });
 
     console.log(
-      `[ConvertProjection] Projection ${id} → ProductionOrder ${productionOrder._id} ` +
+      `[ConvertProjection] Projection ${id} → ProductionOrder ${productionOrder._id} AWAITING_BRAND_PAYMENT ` +
       `(brand: "${projection.brandName}", cost: ₹${totalIngredientCost.toFixed(2)})`
     );
 

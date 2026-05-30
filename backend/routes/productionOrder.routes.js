@@ -9,6 +9,8 @@ import {
   dispatchWarehouseIngredients,
   getProductionOrderStatus,
   completeBatchPreparation,
+  getActiveProductionOrders,
+  markPreparationStarted,
 } from "../controllers/productionOrder.controller.js";
 
 const router = express.Router();
@@ -22,6 +24,22 @@ router.get(
   authMiddleware,
   requireRole("INGREDIENT_MANAGER"),
   getReadyForDispatchOrders
+);
+
+// RECIPE_MANAGER — fetch all orders the chef is actively working on (READY_FOR_DISPATCH + IN_PREPARATION)
+router.get(
+  "/active",
+  authMiddleware,
+  requireRole("RECIPE_MANAGER"),
+  getActiveProductionOrders
+);
+
+// RECIPE_MANAGER — chef acknowledges receipt of ingredients and starts cooking
+router.patch(
+  "/:id/mark-started",
+  authMiddleware,
+  requireRole("RECIPE_MANAGER"),
+  markPreparationStarted
 );
 
 // WALLET_MANAGER — advance indent review → awaiting brand payment

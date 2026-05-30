@@ -320,6 +320,96 @@ export const completeBatchPreparation = async (req, res) => {
 };
 
 /**
+ * GET /api/production-orders/active
+ * RECIPE_MANAGER only.
+ * Returns all production orders in READY_FOR_DISPATCH or IN_PREPARATION so the chef
+ * can see what cargo is incoming and what is actively being cooked.
+ */
+export const getActiveProductionOrders = async (req, res) => {
+  try {
+    const orders = await ProductionOrder.find({
+      status: { $in: ["READY_FOR_DISPATCH", "IN_PREPARATION"] },
+    })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    return res.json({ success: true, data: orders });
+  } catch (err) {
+    console.error("getActiveProductionOrders error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to fetch active production orders" });
+  }
+};
+
+/**
+ * PATCH /api/production-orders/:id/mark-started
+ * RECIPE_MANAGER only.
+ * Chef acknowledges receipt of ingredients and starts cooking.
+ * Transitions READY_FOR_DISPATCH → IN_PREPARATION.
+ *
+ * Also deducts warehouse stock best-effort — mirrors what the INGREDIENT_MANAGER /dispatch
+ * endpoint does. Safe because the READY_FOR_DISPATCH status guard means only ONE of
+ * /dispatch or /mark-started can ever fire for any given order (no double-deduction risk).
+ */
+export const markPreparationStarted = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const order = await ProductionOrder.findById(id);
+    if (!order) {
+      return res.status(404).json({ message: "Production order not found" });
+    }
+    if (order.status !== "READY_FOR_DISPATCH") {
+      return res.status(409).json({
+        message: `Cannot mark started: order status is "${order.status}"`,
+        currentStatus: order.status,
+      });
+    }
+
+    // Deduct warehouse stock for each ingredient (best-effort — does not block transition)
+    for (const item of order.warehouseIngredientsToDispatch) {
+      try {
+        await BrandStock.findOneAndUpdate(
+          {
+            brandName: "SKOPE_WAREHOUSE",
+            itemName: new RegExp(`^${escapeRegex(item.itemName)}$`, "i"),
+            status: "Pending",
+          },
+          {
+            $inc: { qtyRemaining: -item.requiredQty },
+            $push: {
+              history: {
+                type: "TRANSFER_OUT",
+                qty: item.requiredQty,
+                uom: item.uom,
+                at: new Date(),
+                note: "Warehouse deduction recorded by chef on preparation start",
+              },
+            },
+          }
+        );
+      } catch (stockErr) {
+        console.warn(
+          `[MarkPreparationStarted] Stock deduction skipped for "${item.itemName}": ${stockErr?.message}`
+        );
+      }
+    }
+
+    order.status = "IN_PREPARATION";
+    await order.save();
+
+    console.log(
+      `[MarkPreparationStarted] ProductionOrder ${id} → IN_PREPARATION ` +
+      `(brand: "${order.brandName}", items deducted: ${order.warehouseIngredientsToDispatch.length})`
+    );
+
+    return res.json({ success: true, data: order });
+  } catch (err) {
+    console.error("markPreparationStarted error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to mark preparation as started" });
+  }
+};
+
+/**
  * GET /api/production-orders/my-pending
  * Client auth only.
  * Returns all production orders for this brand that are AWAITING_BRAND_PAYMENT.
