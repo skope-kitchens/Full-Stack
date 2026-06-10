@@ -29,7 +29,7 @@ const AdminDashboard = () => {
   const search = typeof window !== "undefined" ? window.location.search : "";
 
   // Role is derived from the JWT payload stored in sessionStorage.
-  // This is the same role the backend will decode â€” guaranteed to be in sync.
+  // This is the same role the backend will decode — guaranteed to be in sync.
   const adminRole = authUtils.getRole();
 
   const handleLogout = () => {
@@ -74,7 +74,7 @@ const AdminDashboard = () => {
 
   return (
     <Layout>
-      <div className="max-w-7xl mx-auto px-6 py-8 relative">
+      <div className="max-w-7xl mx-auto px-6 py-8 relative min-h-screen">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
 
@@ -411,7 +411,7 @@ function InventoryModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -490,7 +490,7 @@ function InventoryModal({ onClose }) {
                           {Number(item.itemQty || 0).toLocaleString("en-IN")}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          â‚¹{Number(item.averageCost || 0).toFixed(2)}
+                          ₹{Number(item.averageCost || 0).toFixed(2)}
                         </td>
                       </tr>
                     ))}
@@ -613,7 +613,7 @@ function IngredientsModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
         <div className="flex-1 overflow-auto p-6">
@@ -641,7 +641,7 @@ function IngredientsModal({ onClose }) {
                     </td>
                     <td className="p-2 text-center">{row.uom || "-"}</td>
                     <td className="p-2 text-right">
-                      â‚¹{Number(row.currentPrice || 0).toFixed(2)}
+                      ₹{Number(row.currentPrice || 0).toFixed(2)}
                     </td>
                     <td className="p-2 text-center">
                       <input
@@ -824,7 +824,7 @@ function RecipesModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -934,7 +934,7 @@ function UpdateRecipeItemsTable({ items, onUpdate, onRemove, isSubRecipe }) {
             <th className="p-2 text-left">Item</th>
             <th className="p-2 w-24">Qty</th>
             <th className="p-2 w-20">UOM</th>
-            <th className="p-2 w-28">Price (â‚¹)</th>
+            <th className="p-2 w-28">Price (₹)</th>
             <th className="p-2 w-16"></th>
           </tr>
         </thead>
@@ -1276,7 +1276,7 @@ function MapIngredientsModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -1353,7 +1353,7 @@ function MapIngredientsModal({ onClose }) {
                       <option value="">Select branch</option>
                       {stores.map((s) => (
                         <option key={s.storeCode} value={s.storeCode}>
-                          {s.storeCode}{s.storeName ? ` â€” ${s.storeName}` : ""}
+                          {s.storeCode}{s.storeName ? ` — ${s.storeName}` : ""}
                         </option>
                       ))}
                     </select>
@@ -1582,7 +1582,7 @@ function IngredientInventoryModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -1650,18 +1650,18 @@ function IngredientInventoryModal({ onClose }) {
                 ) : (
                   rows.map((r) => (
                     <tr key={r._id} className="border-t">
-                      <td className="p-2">{r.requestBrandName || "â€”"}</td>
-                      <td className="p-2">{r.clientBrandName || "â€”"}</td>
+                      <td className="p-2">{r.requestBrandName || "—"}</td>
+                      <td className="p-2">{r.clientBrandName || "—"}</td>
                       <td className="p-2">
-                        <div className="font-medium">{r.recipeName || "â€”"}</div>
+                        <div className="font-medium">{r.recipeName || "—"}</div>
                         <div className="text-xs text-gray-500">{r.branchCode}</div>
                       </td>
                       <td className="p-2">{r.itemName}</td>
-                      <td className="p-2">{r.ingredientBrand || "â€”"}</td>
-                      <td className="p-2">{r.categoryName || "â€”"}</td>
-                      <td className="p-2">{r.uom || "â€”"}</td>
+                      <td className="p-2">{r.ingredientBrand || "—"}</td>
+                      <td className="p-2">{r.categoryName || "—"}</td>
+                      <td className="p-2">{r.uom || "—"}</td>
                       <td className="p-2 text-right">{Number(r.qty || 0)}</td>
-                      <td className="p-2 text-right">â‚¹{Number(r.cost || 0).toFixed(2)}</td>
+                      <td className="p-2 text-right">₹{Number(r.cost || 0).toFixed(2)}</td>
                       <td className="p-2 text-center">
                         {tab === "issue" ? (
                           <div className="flex items-center justify-center gap-2">
@@ -1770,7 +1770,7 @@ function GrnModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
         <div className="flex-1 overflow-auto p-6">
@@ -1840,19 +1840,19 @@ function GrnModal({ onClose }) {
                 ) : (
                   rows.map((r) => (
                     <tr key={r._id} className="border-t">
-                      <td className="p-2">{r.requestBrandName || "â€”"}</td>
+                      <td className="p-2">{r.requestBrandName || "—"}</td>
                       <td className="p-2">
-                        <div className="font-medium">{r.recipeName || "â€”"}</div>
+                        <div className="font-medium">{r.recipeName || "—"}</div>
                         <div className="text-xs text-gray-500">{r.branchCode}</div>
                       </td>
                       <td className="p-2">{r.itemName}</td>
-                      <td className="p-2">{r.ingredientBrand || "â€”"}</td>
-                      <td className="p-2">{r.categoryName || "â€”"}</td>
-                      <td className="p-2">{r.uom || "â€”"}</td>
+                      <td className="p-2">{r.ingredientBrand || "—"}</td>
+                      <td className="p-2">{r.categoryName || "—"}</td>
+                      <td className="p-2">{r.uom || "—"}</td>
                       <td className="p-2 text-right">{Number(r.qty || 0)}</td>
-                      <td className="p-2 text-right">â‚¹{Number(r.cost || 0).toFixed(2)}</td>
+                      <td className="p-2 text-right">₹{Number(r.cost || 0).toFixed(2)}</td>
                       <td className="p-2 text-left">
-                        {r.issuedAt ? new Date(r.issuedAt).toLocaleString() : "â€”"}
+                        {r.issuedAt ? new Date(r.issuedAt).toLocaleString() : "—"}
                       </td>
                     </tr>
                   ))
@@ -1918,7 +1918,7 @@ function CreditNoteModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
         <div className="flex-1 overflow-auto p-6">
@@ -1954,7 +1954,7 @@ function CreditNoteModal({ onClose }) {
                     <tr key={r._id} className="border-t">
                       <td className="p-2">{r.ingredientName}</td>
                       <td className="p-2">
-                        {r.createdAt ? new Date(r.createdAt).toLocaleString() : "â€”"}
+                        {r.createdAt ? new Date(r.createdAt).toLocaleString() : "—"}
                       </td>
                       <td className="p-2 text-center">
                         <button
@@ -2166,7 +2166,7 @@ function TrialTrainingModal({ onClose }) {
             onClick={onClose}
             className="text-gray-500 hover:text-black text-2xl"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -2530,7 +2530,7 @@ function RecipeInventoryModal({ onClose }) {
               onClick={onClose}
               className="text-gray-500 hover:text-black text-2xl"
             >
-              âœ•
+              ✕
             </button>
           </div>
         </div>
@@ -2583,8 +2583,8 @@ function RecipeInventoryModal({ onClose }) {
                   rows.map((r) => (
                     <tr key={r._id} className="border-t">
                       <td className="p-2">{r.itemName}</td>
-                      <td className="p-2">{r.ingredientBrand || "â€”"}</td>
-                      <td className="p-2">{r.uom || "â€”"}</td>
+                      <td className="p-2">{r.ingredientBrand || "—"}</td>
+                      <td className="p-2">{r.uom || "—"}</td>
                       <td className="p-2 text-right">
                         {Number(r.qtyRemaining || 0)}
                       </td>
@@ -2723,7 +2723,7 @@ function RecipeInventoryModal({ onClose }) {
                       key={r._id}
                       value={`${r.itemName || ""}|${r.ingredientBrand || ""}|${r.uom || ""}`}
                     >
-                      {r.itemName} {r.ingredientBrand ? `(${r.ingredientBrand})` : ""} â€” {r.uom || "â€”"}
+                      {r.itemName} {r.ingredientBrand ? `(${r.ingredientBrand})` : ""} — {r.uom || "—"}
                     </option>
                   ))}
               </select>
@@ -2806,7 +2806,7 @@ function CostRow({ label, value }) {
   return (
     <div className="flex justify-between">
       <span className="text-gray-400">{label}</span>
-      <span className="font-semibold">â‚¹{value}</span>
+      <span className="font-semibold">₹{value}</span>
     </div>
   );
 }
@@ -2879,7 +2879,7 @@ function FcrRecipeCostBreakdown({ data, loading }) {
                 className="text-xs font-bold text-gray-700"
                 aria-expanded={isExpanded}
               >
-                {isExpanded ? "âˆ’" : "+"}
+                {isExpanded ? "−" : "+"}
               </button>
             )}
             <span className="font-medium truncate">{node.item}</span>
@@ -2891,7 +2891,7 @@ function FcrRecipeCostBreakdown({ data, loading }) {
             <div className="text-xs text-gray-500">
               {node.qty} {node.uom}
             </div>
-            <div className="font-semibold">â‚¹{node.cost}</div>
+            <div className="font-semibold">₹{node.cost}</div>
           </div>
         </div>
 
@@ -2928,14 +2928,14 @@ function FcrRecipeCostBreakdown({ data, loading }) {
         />
         <div className="border-t border-white/20 mt-3 pt-3 flex justify-between font-bold text-lg">
           <span>Total Cost</span>
-          <span>â‚¹{Number(data.total || 0).toFixed(2)}</span>
+          <span>₹{Number(data.total || 0).toFixed(2)}</span>
         </div>
         <div className="border-t border-white/10 mt-3 pt-3 space-y-2">
           <p className="text-xs text-gray-400 uppercase tracking-wide">FCR Analysis (target 32%)</p>
           <div className="flex justify-between text-sm">
             <span className="text-gray-300">Suggested Price</span>
             <span className="font-bold text-green-400">
-              â‚¹{(Number(data.total || 0) / 0.32).toFixed(2)}
+              ₹{(Number(data.total || 0) / 0.32).toFixed(2)}
             </span>
           </div>
           <div className="flex justify-between text-sm">
@@ -3007,7 +3007,7 @@ function FcrModal({ onClose }) {
             className="text-gray-500 hover:text-black text-2xl"
             type="button"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -3039,7 +3039,7 @@ function FcrModal({ onClose }) {
                         )}
                       </span>
                       <span className="text-gray-500">
-                        {isExpanded ? "âˆ’" : "+"}
+                        {isExpanded ? "−" : "+"}
                       </span>
                     </button>
 
@@ -3110,7 +3110,7 @@ function CheckStockModal({ onClose }) {
       <div className="bg-white rounded-2xl w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-6 border-b">
           <h2 className="text-2xl font-bold">Check Stock</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">âœ•</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
         </div>
 
         <div className="p-4 border-b flex gap-3 items-center">
@@ -3158,7 +3158,7 @@ function CheckStockModal({ onClose }) {
                   <span className="text-gray-500">{record.date}</span>
                   <span className="text-gray-400">{record.items?.length || 0} items</span>
                 </div>
-                <span className="text-gray-400 text-xs">{expandedId === record._id ? "â–²" : "â–¼"}</span>
+                <span className="text-gray-400 text-xs">{expandedId === record._id ? "▲" : "▼"}</span>
               </button>
 
               {expandedId === record._id && (
@@ -3256,7 +3256,7 @@ function StockUpdateModal({ onClose }) {
     const invalid = parsedItems.find(
       (it) => !it.itemName || !it.uom || [it.issueQty, it.usedQty, it.wastageQty, it.remainingQty].some((n) => isNaN(n) || n < 0)
     );
-    if (invalid) return setError("All item fields are required and quantities must be â‰¥ 0.");
+    if (invalid) return setError("All item fields are required and quantities must be ≥ 0.");
 
     setSubmitting(true);
     try {
@@ -3275,7 +3275,7 @@ function StockUpdateModal({ onClose }) {
       <div className="bg-white rounded-2xl w-[95vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-6 border-b">
           <h2 className="text-2xl font-bold">Stock Update</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">âœ•</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-auto p-6 space-y-5">
@@ -3369,7 +3369,7 @@ function StockUpdateModal({ onClose }) {
                       className="text-red-500 hover:text-red-700 text-lg disabled:opacity-30"
                       title="Remove item"
                     >
-                      âœ•
+                      ✕
                     </button>
                   </div>
                 </div>

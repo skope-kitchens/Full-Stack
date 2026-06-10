@@ -82,19 +82,19 @@ router.get(
 
       // 3️⃣ Build O(1) lookup sets from the five signal arrays
       const brandIdsWithOrders = new Set(
-        unseenOrders.map(o => o.brand.toString())
+        unseenOrders.filter(o => o.brand).map(o => o.brand.toString())
       );
       const brandIdsWithMenus = new Set(
-        unseenMenus.map(m => m.clientId.toString())
+        unseenMenus.filter(m => m.clientId).map(m => m.clientId.toString())
       );
       const brandIdsWithProjections = new Set(
-        pendingProjections.map(p => p.brandId.toString())
+        pendingProjections.filter(p => p.brandId).map(p => p.brandId.toString())
       );
       const brandIdsAwaitingPayment = new Set(
-        pendingPaymentOrders.map(p => p.brandId.toString())
+        pendingPaymentOrders.filter(p => p.brandId).map(p => p.brandId.toString())
       );
       const brandIdsDispatchReady = new Set(
-        dispatchReadyOrders.map(p => p.brandId.toString())
+        dispatchReadyOrders.filter(p => p.brandId).map(p => p.brandId.toString())
       );
 
       // 4️⃣ Attach per-brand signal flags

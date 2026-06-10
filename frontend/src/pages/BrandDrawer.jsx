@@ -222,6 +222,18 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
     }
   };
 
+  /* ================= DELETE MENU ENTRY ================= */
+  const handleDeleteMenu = async (entryId) => {
+    // if (!window.confirm("Delete this menu entry? This cannot be undone.")) return;
+    try {
+      await api.delete(`/api/admin/menu-entries/${entryId}`);
+      setMenus((prev) => prev.filter((m) => m._id !== entryId));
+      toast.success("Menu entry deleted.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to delete menu entry.");
+    }
+  };
+
   /* ================= DELETE ORDER ================= */
   const deleteOrder = async (orderId) => {
     if (!window.confirm("Delete this order? This cannot be undone.")) return;
@@ -776,6 +788,13 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
                         <div className="text-sm text-gray-600">
                           {m.createdAt ? new Date(m.createdAt).toLocaleString() : "—"}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMenu(m._id)}
+                          className="text-xs text-red-500 hover:underline"
+                        >
+                          Delete
+                        </button>
                       </div>
                       <ul className="text-sm text-gray-700">
                         {(m.items || []).map((it, idx) => (

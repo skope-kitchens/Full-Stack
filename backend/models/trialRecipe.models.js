@@ -20,6 +20,7 @@ const trialRecipeSchema = new mongoose.Schema(
     brand: { type: String, required: true },
     trialCode: { type: String, enum: ["T1", "T2", "T3"], required: true },
     recipeName: { type: String, required: true },
+    recipeType: { type: String, enum: ["MAIN", "SUB"], default: "MAIN" },
     items: [itemSchema],
   },
   { timestamps: true }

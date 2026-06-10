@@ -23,7 +23,7 @@ const normalizeCategory = (category) => {
 /* ================= CALCULATE COST ================= */
 
 export const calculateFoodCost = async (req, res) => {
-  const { recipeName, wastagePercent = 0, brandName: bodyBrandName } = req.body;
+  const { recipeName, wastagePercent = 5, brandName: bodyBrandName } = req.body;
   // Admin can pass brandName in body to view a brand's recipe; otherwise use logged-in user's brand
   const ADMIN_ROLES = new Set([
     "WALLET_MANAGER",
@@ -77,18 +77,23 @@ export const calculateFoodCost = async (req, res) => {
   // 12% added food cost
   const foodCostWithTax = foodCost * 1.12;
 
-  // production variance = 5% of food cost WITH 12%
-  const productionVariance = foodCostWithTax * 0.05;
+  // production variance — uses wastagePercent from request, defaults to 5%
+  const wastageRate = Math.max(0, Number(wastagePercent)) / 100;
+  const productionVariance = foodCostWithTax * wastageRate;
 
-  const total =
-    foodCostWithTax + packagingCost + productionVariance;
+  const total = foodCostWithTax + packagingCost + productionVariance;
+
+  // suggested selling price to hit ~32% FCR target
+  const suggestedSellingPrice = total / 0.32;
 
   res.json({
     breakdown,
-    foodCost: round(foodCostWithTax), // includes 12%
+    foodCost: round(foodCostWithTax),
     packagingCost: round(packagingCost),
     productionVariance: round(productionVariance),
+    wastagePercent: Number(wastagePercent),
     total: round(total),
+    suggestedSellingPrice: round(suggestedSellingPrice),
   });
 };
 
@@ -272,6 +277,7 @@ export const getSummary = async (req, res) => {
       packagingCost: result.packagingCost,
       productionVariance: result.productionVariance,
       totalCost: result.total,
+      suggestedSellingPrice: result.suggestedSellingPrice,
     });
   }
 
@@ -308,14 +314,14 @@ async function calculateRecipe(recipeId) {
 
   const foodCostWithTax = foodCost * 1.12;
   const productionVariance = foodCostWithTax * 0.05;
+  const total = foodCostWithTax + packagingCost + productionVariance;
 
   return {
-    foodCost: round(foodCostWithTax), // includes 12%
+    foodCost: round(foodCostWithTax),
     packagingCost: round(packagingCost),
     productionVariance: round(productionVariance),
-    total: round(
-      foodCostWithTax + packagingCost + productionVariance
-    ),
+    total: round(total),
+    suggestedSellingPrice: round(total / 0.32),
   };
 }
 

@@ -21,6 +21,7 @@ const trainingRecipeSchema = new mongoose.Schema(
     trainingCode: { type: String, enum: ["TR1", "TR2", "TR3"], required: true },
     recipeName: { type: String, required: true },
     sopLink: { type: String, default: "" },
+    recipeType: { type: String, enum: ["MAIN", "SUB"], default: "MAIN" },
     items: [itemSchema],
   },
   { timestamps: true }

@@ -43,6 +43,7 @@ Thumbs.db
 
 # Graphify generated output
 graphify-out/
+.graphify/
 
 # Claude local tooling
 .claude/

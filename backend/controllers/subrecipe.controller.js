@@ -102,7 +102,7 @@ export const getSubRecipeCost = async (req, res) => {
 /* ---------------- CREATE ---------------- */
 export const createSubRecipe = async (req, res) => {
   try {
-    const { brand, recipeName, items } = req.body;
+    const { brand, recipeName, items, yield: recipeYield } = req.body;
 
     if (!brand || !recipeName || !Array.isArray(items)) {
       return res.status(400).json({
@@ -113,6 +113,7 @@ export const createSubRecipe = async (req, res) => {
     const subRecipe = await SubRecipe.create({
       brand,
       recipeName,
+      yield: Number(recipeYield) || 0,
       items,
     });
 
