@@ -20,13 +20,14 @@ const EMPTY_NODE = () => ({
 
 
 export default function AddRecipe() {
-  const [recipeType, setRecipeType] = useState("MAIN"); 
+  const [recipeType, setRecipeType] = useState("MAIN");
   const [branchCode, setBranchCode] = useState("");
   const [brand, setBrand] = useState("");
   const [brandOptions, setBrandOptions] = useState([]);
   const [recipeName, setRecipeName] = useState("");
   const [trainingNameOptions, setTrainingNameOptions] = useState([]);
   const [sopLink, setSopLink] = useState("");
+  const [subYield, setSubYield] = useState(0);
   const [items, setItems] = useState([EMPTY_NODE()]);
   const [subRecipes, setSubRecipes] = useState([]);
   const navigate = useNavigate();
@@ -71,33 +72,37 @@ export default function AddRecipe() {
     loadBrands();
   }, []);
 
-  // Strict sequential selection: MAIN recipeName dropdown only from Training TR3
+  // Strict sequential selection: recipeName dropdown only from Training TR3, filtered by current recipeType
   useEffect(() => {
     const loadTrainingNames = async () => {
       try {
         const res = await api.get("/api/training-recipes");
         const list = res.data?.data || [];
         const names = list
-          .filter((r) => r.trainingCode === "TR3")
+          .filter((r) => {
+            if (r.trainingCode !== "TR3") return false;
+            // backward compat: old records with no recipeType are treated as MAIN
+            const rType = r.recipeType || "MAIN";
+            return rType === recipeType;
+          })
           .map((r) => r.recipeName)
           .filter(Boolean);
         const opts = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
         setTrainingNameOptions(opts);
-        if (opts.length && !recipeName) setRecipeName(opts[0]);
+        setRecipeName(opts.length ? opts[0] : "");
       } catch (e) {
         console.error("Failed to load training recipes", e);
         setTrainingNameOptions([]);
       }
     };
     loadTrainingNames();
-  }, []);
+  }, [recipeType]);
 
   // Sequential versioning prefill: MAIN prefill from Training TR3 (same recipeName)
   useEffect(() => {
     const prefill = async () => {
       const name = String(recipeName || "").trim();
       if (!name) return;
-      if (recipeType !== "MAIN") return;
       try {
         const res = await api.get("/api/training-recipes");
         const list = res.data?.data || [];
@@ -119,18 +124,11 @@ export default function AddRecipe() {
 
 
   const saveRecipe = async () => {
-    const payload = {
-      brand,
-      recipeName,
-      sopLink: recipeType === "MAIN" ? sopLink : "",
-      items,
-    };
-
     try {
       if (recipeType === "MAIN") {
-        await api.post("/api/mainrecipes", payload);
+        await api.post("/api/mainrecipes", { brand, recipeName, sopLink, items });
       } else {
-        await api.post("/api/subrecipes", payload);
+        await api.post("/api/subrecipes", { brand, recipeName, yield: subYield, items });
       }
       toast.success("Recipe saved successfully");
     } catch (err) {
@@ -207,7 +205,8 @@ export default function AddRecipe() {
                 value={recipeType}
                 onChange={(e) => {
                   setRecipeType(e.target.value);
-                  setItems([EMPTY_NODE()]); // reset items when switching
+                  setItems([EMPTY_NODE()]);
+                  setSubYield(0);
                 }}
                 className="w-full rounded-lg border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400"
               >
@@ -228,6 +227,22 @@ export default function AddRecipe() {
                 value={sopLink}
                 onChange={(e) => setSopLink(e.target.value)}
                 placeholder="https://drive.google.com/..."
+                className="w-full rounded-lg border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400"
+              />
+            </div>
+          )}
+
+          {recipeType === "SUB" && (
+            <div className="mt-4 max-w-xs">
+              <label className="block text-sm text-gray-600 mb-1">
+                Batch Yield (how much this sub-recipe produces)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={subYield}
+                onChange={(e) => setSubYield(Number(e.target.value) || 0)}
                 className="w-full rounded-lg border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400"
               />
             </div>
@@ -278,7 +293,13 @@ export default function AddRecipe() {
         </div>
 
         {/* SAVE BUTTON */}
-        <div className="flex justify-end">
+        <div className="flex justify-between">
+          <button
+            onClick={() => navigate(-1)}
+            className="bg-gray-200 text-gray-800 px-8 py-3 rounded-lg hover:bg-gray-300 transition"
+          >
+            Go Back
+          </button>
           <button
             onClick={saveRecipe}
             className="bg-black text-white px-8 py-3 rounded-lg hover:bg-gray-800 transition"

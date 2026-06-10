@@ -14,10 +14,10 @@ Not "mostly working." Not "should work." Actually working.
 ---
 
 ## Always Use the Knowledge Graph First
-- ALWAYS read `graphify-out/GRAPH_REPORT.md` before touching anything
+- ALWAYS read `.graphify/graph_report.md` before touching anything
 - This is your map of the entire codebase — always consult it first
-- After making any code changes, run `graphify update .` to keep it current
-- For finding how things connect, use `graphify query "<question>"` instead of searching files blindly
+- After making any code changes, run `nodesify-graphify update .` to keep it current
+- For finding how things connect, use `nodesify-graphify query "<question>"` instead of searching files blindly
 
 ---
 
@@ -278,3 +278,12 @@ A Cloud Kitchen Operating System (CKOS) — a vertical ERP for multi-brand cloud
 ## Golden Rule
 The founder's only goal is a fully working project. Every decision you make should serve that goal. Write real code. Fix real bugs. Build real features. Make it work.
 
+
+## graphify
+
+This project has a nodesify-graphify knowledge graph at .graphify/.
+
+Rules:
+- MUST read .graphify/graph_report.md before searching files for architecture or codebase questions
+- MUST use `nodesify-graphify query "<question>"`, `nodesify-graphify path "<A>" "<B>"`, or `nodesify-graphify explain "<concept>"` for cross-module questions — do NOT grep/read files directly for these
+- After modifying code files in this session, run `nodesify-graphify update .` to keep the graph current

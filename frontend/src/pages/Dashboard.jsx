@@ -61,7 +61,7 @@ export default function Dashboard() {
 
   const [showEnterMenu, setShowEnterMenu] = useState(false);
   const [menuRows, setMenuRows] = useState([
-    { recipeName: "", qty: 1, uom: "GM", cost: 0 },
+    { recipeName: "", qty: 1, uom: "PC", cost: 0 },
   ]);
   const [menuSaving, setMenuSaving] = useState(false);
   const [showClientMenu, setShowClientMenu] = useState(false);
@@ -1181,6 +1181,7 @@ export default function Dashboard() {
                             className="w-full border rounded px-2 py-1 text-sm"
                           >
                             <option value="">Select</option>
+                            <option value="PC">PC</option>
                             <option value="ML">ml</option>
                             <option value="GM">gm</option>
                             <option value="KG">Kg</option>

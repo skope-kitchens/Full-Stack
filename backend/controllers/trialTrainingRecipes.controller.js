@@ -3,7 +3,7 @@ import TrainingRecipe from "../models/trainingRecipe.models.js";
 
 export const createTrialRecipe = async (req, res) => {
   try {
-    const { brand, trialCode, recipeName, items } = req.body || {};
+    const { brand, trialCode, recipeName, items, recipeType } = req.body || {};
     if (!brand || !trialCode || !recipeName || !Array.isArray(items)) {
       return res.status(400).json({ message: "Invalid trial recipe payload" });
     }
@@ -12,6 +12,7 @@ export const createTrialRecipe = async (req, res) => {
       brand,
       trialCode,
       recipeName,
+      recipeType: recipeType === "SUB" ? "SUB" : "MAIN",
       items,
     });
 
@@ -24,7 +25,7 @@ export const createTrialRecipe = async (req, res) => {
 
 export const createTrainingRecipe = async (req, res) => {
   try {
-    const { brand, trainingCode, recipeName, items, sopLink } = req.body || {};
+    const { brand, trainingCode, recipeName, items, sopLink, recipeType } = req.body || {};
     if (!brand || !trainingCode || !recipeName || !Array.isArray(items)) {
       return res.status(400).json({ message: "Invalid training recipe payload" });
     }
@@ -34,6 +35,7 @@ export const createTrainingRecipe = async (req, res) => {
       trainingCode,
       recipeName,
       sopLink: typeof sopLink === "string" ? sopLink.trim() : "",
+      recipeType: recipeType === "SUB" ? "SUB" : "MAIN",
       items,
     });
 

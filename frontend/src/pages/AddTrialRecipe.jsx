@@ -231,7 +231,13 @@ export default function AddTrialRecipe() {
           </button>
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-between">
+          <button
+            onClick={() => navigate(-1)}
+            className="bg-gray-200 text-gray-800 px-8 py-3 rounded-lg hover:bg-gray-300 transition"
+          >
+            Go Back
+          </button>
           <button
             onClick={saveRecipe}
             className="bg-black text-white px-8 py-3 rounded-lg hover:bg-gray-800 transition"

@@ -41,6 +41,20 @@ export const createMenuEntry = async (req, res) => {
   }
 };
 
+export const deleteMenuEntry = async (req, res) => {
+  try {
+    const { entryId } = req.params;
+    const deleted = await MenuEntry.findByIdAndDelete(entryId);
+    if (!deleted) {
+      return res.status(404).json({ message: "Menu entry not found" });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Delete menu entry error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to delete menu entry" });
+  }
+};
+
 export const listMenuEntriesForBrand = async (req, res) => {
   try {
     const { brandId } = req.params;

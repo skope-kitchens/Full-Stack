@@ -1,7 +1,7 @@
 import express from "express";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireAdmin.js";
-import { createMenuEntry, listMenuEntriesForBrand } from "../controllers/menuEntry.controller.js";
+import { createMenuEntry, listMenuEntriesForBrand, deleteMenuEntry } from "../controllers/menuEntry.controller.js";
 
 const router = express.Router();
 
@@ -16,5 +16,12 @@ router.get(
   listMenuEntriesForBrand
 );
 
-export default router;
+// Recipe admin deletes a menu entry
+router.delete(
+  "/admin/menu-entries/:entryId",
+  authMiddleware,
+  requireRole("RECIPE_MANAGER"),
+  deleteMenuEntry
+);
 
+export default router;
