@@ -7,7 +7,10 @@ export const createMenuEntry = async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const { items } = req.body || {};
+    const { items, branchCode } = req.body || {};
+    if (!branchCode || !String(branchCode).trim()) {
+      return res.status(400).json({ message: "branchCode is required" });
+    }
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "items[] is required" });
     }
@@ -30,6 +33,7 @@ export const createMenuEntry = async (req, res) => {
     const entry = await MenuEntry.create({
       clientId: req.user._id,
       brandName: client?.brandName || "",
+      branchCode: String(branchCode).trim(),
       items: safeItems,
       isSeenByRecipeAdmin: false,
     });
@@ -63,13 +67,18 @@ export const listMenuEntriesForBrand = async (req, res) => {
       return res.status(404).json({ message: "Brand not found" });
     }
 
-    const list = await MenuEntry.find({ clientId: brandId })
+    const q = { clientId: brandId };
+    if (req.user.role === "RECIPE_MANAGER") q.branchCode = req.user.branchCode;
+
+    const list = await MenuEntry.find(q)
       .sort({ createdAt: -1 })
       .lean();
 
     // mark as seen
+    const seenFilter = { clientId: brandId, isSeenByRecipeAdmin: false };
+    if (req.user.role === "RECIPE_MANAGER") seenFilter.branchCode = req.user.branchCode;
     await MenuEntry.updateMany(
-      { clientId: brandId, isSeenByRecipeAdmin: false },
+      seenFilter,
       { $set: { isSeenByRecipeAdmin: true } }
     );
 

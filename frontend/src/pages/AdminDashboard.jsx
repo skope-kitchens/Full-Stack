@@ -25,6 +25,7 @@ const AdminDashboard = () => {
   const [showFcrModal, setShowFcrModal] = useState(false);
   const [showCheckStockModal, setShowCheckStockModal] = useState(false);
   const [showStockUpdateModal, setShowStockUpdateModal] = useState(false);
+  const [showPurchaseRegisterModal, setShowPurchaseRegisterModal] = useState(false);
   const navigate = useNavigate();
   const search = typeof window !== "undefined" ? window.location.search : "";
 
@@ -42,6 +43,29 @@ const AdminDashboard = () => {
   const isWalletManager = adminRole === "WALLET_MANAGER";
   const isRecipeManager = adminRole === "RECIPE_MANAGER";
   const isIngredientManager = adminRole === "INGREDIENT_MANAGER";
+
+  const branchCode = authUtils.getBranchCode();
+  const warehouseId = authUtils.getWarehouseId();
+  const branchCodes = authUtils.getBranchCodes();
+
+  // Convert codes like "TESTBRANCH" or "JPNAGAR" into readable labels
+  // ("Test Branch", "JP Nagar") for display under the dashboard heading.
+  const formatLocationName = (code) => {
+    if (!code) return "";
+    const overrides = {
+      JPNAGAR: "JP Nagar",
+      MARATHAHALLI: "Marathahalli",
+      KALYANNAGAR: "Kalyan Nagar",
+      TESTBRANCH: "Test Branch",
+      TESTWAREHOUSE: "Test Warehouse",
+    };
+    if (overrides[code]) return overrides[code];
+    return code
+      .toLowerCase()
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
 
   const hasMenuOptions = isRecipeManager || isIngredientManager;
   const canManageBrand = isWalletManager || isRecipeManager || isIngredientManager;
@@ -75,7 +99,7 @@ const AdminDashboard = () => {
   return (
     <Layout>
       <div className="max-w-7xl mx-auto px-6 py-8 relative min-h-screen">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-1">
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
 
           <div className="flex items-center gap-3 relative">
@@ -190,7 +214,16 @@ const AdminDashboard = () => {
                         >
                           FCR
                         </button>
-                        
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMenu(false);
+                            navigate("/fridge-audit");
+                          }}
+                          className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                        >
+                          Fridge Audit
+                        </button>
                       </>
                     )}
                     {isIngredientManager && (
@@ -270,6 +303,18 @@ const AdminDashboard = () => {
                         Stock Update
                       </button>
                     )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowPurchaseRegisterModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Purchase Register
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -283,6 +328,35 @@ const AdminDashboard = () => {
             </button>
           </div>
         </div>
+
+        {(branchCode || warehouseId || branchCodes.length > 0) && (
+          <div className="mb-6 text-sm text-gray-600">
+            {isRecipeManager && branchCode && (
+              <span>
+                Branch: <span className="font-semibold">{formatLocationName(branchCode)}</span>
+                {warehouseId && (
+                  <>
+                    {" "}&middot; Supplied by warehouse:{" "}
+                    <span className="font-semibold">{formatLocationName(warehouseId)}</span>
+                  </>
+                )}
+              </span>
+            )}
+            {isIngredientManager && warehouseId && (
+              <span>
+                Warehouse: <span className="font-semibold">{formatLocationName(warehouseId)}</span>
+                {branchCodes.length > 0 && (
+                  <>
+                    {" "}&middot; Supplies branches:{" "}
+                    <span className="font-semibold">
+                      {branchCodes.map(formatLocationName).join(", ")}
+                    </span>
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Brand list visible to all admin roles; drawer only for wallet/order managers */}
         <BrandList
@@ -349,6 +423,11 @@ const AdminDashboard = () => {
         {/* Stock Update modal for ingredient manager */}
         {isIngredientManager && showStockUpdateModal && (
           <StockUpdateModal onClose={() => setShowStockUpdateModal(false)} />
+        )}
+
+        {/* Purchase Register modal for ingredient manager */}
+        {isIngredientManager && showPurchaseRegisterModal && (
+          <PurchaseRegisterModal onClose={() => setShowPurchaseRegisterModal(false)} />
         )}
 
         {/* FCR breakdown modal */}
@@ -1230,16 +1309,32 @@ function MapIngredientsModal({ onClose }) {
     if (!selectedRecipe?._id) return;
     if (!branchCode) return;
     if (!clientBrandName.trim()) return;
-    const items = rows
-      .map((r) => ({
-        skuCode: r.skuCode,
-        itemName: (r.itemName || r.customItemName || "").trim(),
-        ingredientBrand: String(r.ingredientBrand || "").trim(),
-        categoryName: r.categoryName,
-        uom: r.uom,
-        qty: Number(r.qty || 0),
-      }))
-      .filter((r) => r.itemName && r.ingredientBrand && r.uom && r.categoryName);
+    const mappedRows = rows.map((r) => ({
+      skuCode: r.skuCode,
+      itemName: (r.itemName || r.customItemName || "").trim(),
+      ingredientBrand: String(r.ingredientBrand || "").trim(),
+      categoryName: r.categoryName,
+      uom: r.uom,
+      qty: Number(r.qty || 0),
+    }));
+
+    const items = mappedRows.filter(
+      (r) => r.itemName && r.ingredientBrand && r.uom && r.categoryName
+    );
+
+    // Items with a name but missing required fields (brand/uom/category) are
+    // silently dropped from the indent — warn the recipe admin so this doesn't
+    // go unnoticed (e.g. recipe ingredients that have no brand specified yet).
+    const skipped = mappedRows.filter(
+      (r) => r.itemName && !(r.ingredientBrand && r.uom && r.categoryName)
+    );
+    if (skipped.length > 0) {
+      const names = skipped.map((r) => r.itemName).join(", ");
+      const proceed = window.confirm(
+        `These ingredients are missing a Brand, UOM, or Category and will NOT be sent in the indent:\n\n${names}\n\nFill them in before saving, or click OK to continue without them.`
+      );
+      if (!proceed) return;
+    }
 
     setSaving(true);
     try {
@@ -3391,6 +3486,214 @@ function StockUpdateModal({ onClose }) {
               className="px-5 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
             >
               {submitting ? "Submitting..." : "Submit"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- PURCHASE REGISTER MODAL ---------- */
+function PurchaseRegisterModal({ onClose }) {
+  const emptyForm = {
+    itemName: "",
+    ingredientBrand: "",
+    uom: "KG",
+    qty: "",
+    pricePerUnit: "",
+    expiryDate: "",
+    vendorName: "",
+  };
+
+  const [brands, setBrands] = useState([]);
+  const [brandId, setBrandId] = useState("");
+  const [form, setForm] = useState({ ...emptyForm });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.get("/api/admin/brands")
+      .then((res) => {
+        const list = res.data?.data || [];
+        setBrands(list);
+        if (list.length) setBrandId(list[0]._id);
+      })
+      .catch(() => setBrands([]));
+  }, []);
+
+  const updateField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    const selectedBrand = brands.find((b) => b._id === brandId);
+    if (!selectedBrand) return setError("Brand is required.");
+
+    const itemName = form.itemName.trim();
+    const ingredientBrand = form.ingredientBrand.trim();
+    const uom = form.uom.trim();
+    const qty = Number(form.qty);
+    const pricePerUnit = Number(form.pricePerUnit);
+
+    if (!itemName) return setError("Item name is required.");
+    if (!ingredientBrand) return setError("Ingredient brand is required.");
+    if (!uom) return setError("UOM is required.");
+    if (!Number.isFinite(qty) || qty <= 0) return setError("Quantity must be greater than 0.");
+    if (!Number.isFinite(pricePerUnit) || pricePerUnit < 0) return setError("Price must be a valid non-negative number.");
+    if (!form.expiryDate) return setError("Expiry date is required.");
+
+    setSubmitting(true);
+    try {
+      await api.post("/api/purchase-register", {
+        brandName: selectedBrand.brandName,
+        itemName,
+        ingredientBrand,
+        uom,
+        qty,
+        pricePerUnit,
+        expiryDate: form.expiryDate,
+        vendorName: form.vendorName.trim(),
+      });
+      toast.success("Purchase entry added successfully");
+      setForm({ ...emptyForm });
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to add purchase entry.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Purchase Register</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex-1 overflow-auto p-6 space-y-5">
+          {error && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+            <select
+              value={brandId}
+              onChange={(e) => setBrandId(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+            >
+              {brands.length === 0 && <option value="">Loading brands...</option>}
+              {brands.map((b) => (
+                <option key={b._id} value={b._id}>{b.brandName}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Item Name</label>
+              <input
+                type="text"
+                value={form.itemName}
+                onChange={(e) => updateField("itemName", e.target.value)}
+                placeholder="e.g. Paneer"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ingredient Brand</label>
+              <input
+                type="text"
+                value={form.ingredientBrand}
+                onChange={(e) => updateField("ingredientBrand", e.target.value)}
+                placeholder="e.g. Amul"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.qty}
+                onChange={(e) => updateField("qty", e.target.value)}
+                placeholder="0"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">UOM</label>
+              <select
+                value={form.uom}
+                onChange={(e) => updateField("uom", e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              >
+                <option value="KG">KG</option>
+                <option value="GM">GM</option>
+                <option value="L">L</option>
+                <option value="ML">ML</option>
+                <option value="PC">PC</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Price per Unit (₹)</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.pricePerUnit}
+                onChange={(e) => updateField("pricePerUnit", e.target.value)}
+                placeholder="0.00"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+              <input
+                type="date"
+                value={form.expiryDate}
+                onChange={(e) => updateField("expiryDate", e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor Name (optional)</label>
+              <input
+                type="text"
+                value={form.vendorName}
+                onChange={(e) => updateField("vendorName", e.target.value)}
+                placeholder="e.g. Local Vendor"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Add Purchase"}
             </button>
           </div>
         </form>

@@ -8,6 +8,22 @@ import Layout from "../../components/Layout";
 
 const fmt = (n, d = 2) => Number(n || 0).toFixed(d);
 
+const formatSubmittedAt = (value) => {
+  if (!value) return "";
+  const d = new Date(value);
+  const datePart = d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  const timePart = d.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return `${datePart}, ${timePart}`;
+};
+
 const SufficiencyBadge = ({ sufficient }) =>
   sufficient ? (
     <span className="text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
@@ -271,8 +287,23 @@ export default function ProjectionReview() {
     if (!productionOrderId) return;
     setCompleting(true);
     try {
-      await api.patch(`/api/production-orders/${productionOrderId}/complete`);
-      toast.success("Production batch completed — kitchen fridge stock updated");
+      const res = await api.patch(`/api/production-orders/${productionOrderId}/complete`);
+      const fridgeUpdated = res.data?.fridgeUpdated || [];
+      const fridgeSkipped = res.data?.fridgeSkipped || [];
+
+      if (fridgeUpdated.length > 0) {
+        const summary = fridgeUpdated.map((f) => `${f.qty} ${f.uom} ${f.subRecipeName}`).join(", ");
+        toast.success(`Production batch completed — fridge updated: ${summary}`);
+      } else {
+        toast.success("Production batch completed — no semi-finished items needed to be added to the fridge.");
+      }
+
+      for (const skip of fridgeSkipped) {
+        if (skip.reason !== "No additional batches were required") {
+          toast.error(`Fridge NOT updated for "${skip.subRecipeName}": ${skip.reason}`);
+        }
+      }
+
       navigate("/admin-dashboard");
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to mark preparation complete");
@@ -391,6 +422,11 @@ export default function ProjectionReview() {
                   <p className="text-xs text-gray-500 mt-0.5">
                     For: {new Date(p.forDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}
                   </p>
+                  {p.submittedAt && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Submitted: {formatSubmittedAt(p.submittedAt)}
+                    </p>
+                  )}
                 </div>
                 <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-medium">Pending Review</span>
               </div>
@@ -444,6 +480,11 @@ export default function ProjectionReview() {
                   </span>
                   <span className="text-sm font-medium text-gray-700">— {projection.brandName}</span>
                 </div>
+              )}
+              {projection?.submittedAt && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Submitted: {formatSubmittedAt(projection.submittedAt)}
+                </p>
               )}
             </div>
           </div>

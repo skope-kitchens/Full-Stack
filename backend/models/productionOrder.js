@@ -48,6 +48,9 @@ const productionOrderSchema = new mongoose.Schema(
       index: true,
     },
     brandName: { type: String, required: true, trim: true, index: true },
+    // The kitchen branch that will prepare and store this batch (chef's branchCode at confirmation time).
+    // Used to credit the correct kitchen's fridge (SEMI_FINISHED stock) on completion.
+    branchCode: { type: String, default: null, trim: true, uppercase: true, index: true },
     scaledTargetQty: { type: Number, default: 0 },
     status: {
       type: String,

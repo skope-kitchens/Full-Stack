@@ -1,5 +1,6 @@
 import IngredientIndent from "../models/ingredientIndent.js";
 import BrandStock from "../models/brandStock.js";
+import { deductFromPurchaseRegister } from "./purchaseRegister.controller.js";
 
 export const createIndent = async (req, res) => {
   try {
@@ -148,9 +149,11 @@ export const issueIndentItem = async (req, res) => {
             brandName,
             itemName: doc.itemName,
             ingredientBrand: String(doc.ingredientBrand || "").trim(),
+            location: "BRANCH_KITCHEN",
+            branchCode: String(doc.branchCode || "JPNAGAR").trim().toUpperCase(),
           },
           {
-            $setOnInsert: { uom: doc.uom || "", ownedBy: brandName, location: "BRANCH_KITCHEN", branchCode: String(doc.branchCode || "JP_NAGAR").trim() },
+            $setOnInsert: { uom: doc.uom || "", ownedBy: brandName },
             $inc: { qtyRemaining: Number(doc.qty || 0) },
             $push: {
               history: {
@@ -176,6 +179,20 @@ export const issueIndentItem = async (req, res) => {
           isSeenByRecipeAdminGrn: false,
         },
       });
+
+      // Best-effort FEFO deduction from the brand's Purchase Register.
+      // Never blocks the indent issue — failures/shortfalls are only logged.
+      if (brandName) {
+        await deductFromPurchaseRegister({
+          brandName,
+          itemName: doc.itemName,
+          ingredientBrand: doc.ingredientBrand,
+          qty: Number(doc.qty || 0),
+          uom: doc.uom || "",
+          branchCode: doc.branchCode || "JPNAGAR",
+          referenceId: doc._id,
+        });
+      }
 
       return res.json({ success: true });
     } catch (creditErr) {

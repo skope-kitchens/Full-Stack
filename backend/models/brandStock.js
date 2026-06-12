@@ -6,11 +6,13 @@ const historySchema = new mongoose.Schema(
       type: String,
       enum: [
         "ISSUE",
+        "RECEIVED",
         "TRANSFER_IN",
         "TRANSFER_OUT",
         "RECONCILIATION",
         "PROCUREMENT_IN",
         "WASTAGE",
+        "SPOILAGE",
         "MARK_USED",
         "MARK_ARCHIVED",
       ],
@@ -33,6 +35,12 @@ const historySchema = new mongoose.Schema(
     },
     actorRole: { type: String, default: "" },
     note: { type: String, default: "" },
+    // For SPOILAGE entries — why the cooked food was removed from the fridge.
+    spoilageReason: {
+      type: String,
+      enum: ["SPOILED_EXPIRED", "WASTAGE", "QUALITY_REJECTION", "OTHER", null],
+      default: null,
+    },
   },
   { _id: false }
 );
@@ -60,7 +68,9 @@ const brandStockSchema = new mongoose.Schema(
     // Who owns this stock (SKOPE_WAREHOUSE for central stock, brandName for brand-owned).
     ownedBy: { type: String, default: null, trim: true, index: true },
     // Which physical branch this stock sits at.
-    branchCode: { type: String, default: "JP_NAGAR", trim: true, index: true },
+    // Format must match AdminUser.branchCode (uppercase, no underscore — e.g. "JPNAGAR"),
+    // since RECIPE_MANAGER accounts filter fridge/kitchen stock by that exact value.
+    branchCode: { type: String, default: "JPNAGAR", trim: true, uppercase: true, index: true },
     // Whether this brand's inventory is managed through ERP procurement flows.
     // false = Category A (kitchen-only) brands — no automated deduction.
     inventoryManaged: { type: Boolean, default: true },
@@ -73,9 +83,15 @@ const brandStockSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Existing index preserved — will be superseded by compound ledger index in Phase 1 migration.
-// DO NOT DROP this index until migration script has been verified in production.
-brandStockSchema.index({ brandName: 1, itemName: 1, ingredientBrand: 1 }, { unique: true });
+// Ledger key now includes branchCode + location, so the same ingredient can be
+// tracked as separate stock records per branch/storage location (e.g. "bun" at
+// JPNAGAR Branch Kitchen vs "bun" at TESTBRANCH Branch Kitchen are different records).
+// The previous {brandName, itemName, ingredientBrand} index has been dropped via
+// migration script (backend/scripts/migrateBrandStockIndex.js).
+brandStockSchema.index(
+  { brandName: 1, itemName: 1, ingredientBrand: 1, branchCode: 1, location: 1 },
+  { unique: true }
+);
 
 export default mongoose.model("BrandStock", brandStockSchema, "brand_stocks");
 

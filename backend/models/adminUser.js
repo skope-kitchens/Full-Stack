@@ -37,6 +37,34 @@ const adminUserSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    // Recipe Managers are scoped to a single kitchen branch (e.g. "JPNAGAR").
+    // Operational data (projections, kitchen inventory, fridge stock) for that
+    // branch is visible only to its branch's Recipe Manager. Recipes themselves
+    // remain global and are not filtered by this field.
+    branchCode: {
+      type: String,
+      default: null,
+      trim: true,
+      uppercase: true,
+      index: true,
+    },
+    // Ingredient Managers are scoped to a single warehouse (e.g. "WAREHOUSE_JPNAGAR").
+    // One warehouse can serve multiple kitchen branches.
+    warehouseId: {
+      type: String,
+      default: null,
+      trim: true,
+      uppercase: true,
+      index: true,
+    },
+    // The kitchen branches this warehouse supplies (a warehouse can serve
+    // multiple kitchens, e.g. JP Nagar warehouse supplies Marathahalli and
+    // Kalyan Nagar too). Used by Ingredient Managers.
+    branchCodes: {
+      type: [String],
+      default: [],
+      set: (codes) => (Array.isArray(codes) ? codes.map((c) => String(c).trim().toUpperCase()) : codes),
+    },
     isActive: {
       type: Boolean,
       default: true,

@@ -24,6 +24,11 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
   const [loadingDispatch, setLoadingDispatch] = useState(false);
   const [dispatchingId, setDispatchingId] = useState(null);
 
+  // Ingredient Manager — Purchase Register stock view
+  const [showPurchaseRegister, setShowPurchaseRegister] = useState(false);
+  const [purchaseRegisterStock, setPurchaseRegisterStock] = useState([]);
+  const [loadingPurchaseRegister, setLoadingPurchaseRegister] = useState(false);
+
   // Recipe Manager — per-brand active kitchen production orders
   const [kitchenOrders, setKitchenOrders] = useState([]);
   const [loadingKitchen, setLoadingKitchen] = useState(false);
@@ -190,6 +195,21 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
       toast.error(err.response?.data?.message || "Dispatch failed. Please try again.");
     } finally {
       setDispatchingId(null);
+    }
+  };
+
+  /* ================= PURCHASE REGISTER STOCK (INGREDIENT MANAGER ONLY) ================= */
+  const handleViewPurchaseRegister = async () => {
+    setShowPurchaseRegister(true);
+    setLoadingPurchaseRegister(true);
+    try {
+      const res = await api.get(`/api/purchase-register/${encodeURIComponent(brand.brandName)}`);
+      setPurchaseRegisterStock(res.data?.data || []);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to load purchase register stock.");
+      setPurchaseRegisterStock([]);
+    } finally {
+      setLoadingPurchaseRegister(false);
     }
   };
 
@@ -438,6 +458,19 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ================= PURCHASE REGISTER STOCK (INGREDIENT MANAGER ONLY) ================= */}
+        {isIngredientManager && (
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={handleViewPurchaseRegister}
+              className="w-full border border-gray-300 text-gray-800 py-3 rounded-xl font-semibold text-sm hover:bg-gray-50 transition"
+            >
+              Purchase Register Stock
+            </button>
           </div>
         )}
 
@@ -870,6 +903,77 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
           </div>
         );
       })()}
+
+      {/* ================= PURCHASE REGISTER STOCK MODAL ================= */}
+      {showPurchaseRegister && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl w-[95vw] max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-6 border-b">
+              <h2 className="text-xl font-bold">Purchase Register Stock — {brand.brandName}</h2>
+              <button
+                onClick={() => setShowPurchaseRegister(false)}
+                className="text-gray-500 hover:text-black text-2xl"
+              >
+                {"\u2715"}
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              {loadingPurchaseRegister ? (
+                <p className="text-sm text-gray-400 text-center">Loading stock...</p>
+              ) : purchaseRegisterStock.length === 0 ? (
+                <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center">
+                  <p className="text-sm font-medium text-gray-500">No purchase entries found for this brand.</p>
+                </div>
+              ) : (
+                <div className="border rounded-lg overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Item</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Ingredient Brand</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-700">Remaining</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">UOM</th>
+                        <th className="px-3 py-2 text-right font-semibold text-gray-700">Price/Unit</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Expiry Date</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Status</th>
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Alert</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {purchaseRegisterStock.map((item, idx) => (
+                        <tr key={item._id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                          <td className="px-3 py-2 font-medium">{item.itemName}</td>
+                          <td className="px-3 py-2 text-gray-600">{item.ingredientBrand}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{Number(item.qtyRemaining || 0).toFixed(3)}</td>
+                          <td className="px-3 py-2 text-gray-500 uppercase text-xs">{item.uom}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {"\u20b9"}{Number(item.pricePerUnit || 0).toFixed(2)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {new Date(item.expiryDate).toLocaleDateString("en-IN", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </td>
+                          <td className="px-3 py-2 text-xs">{item.status}</td>
+                          <td className="px-3 py-2">
+                            {item.expiringSoon && item.status !== "DEPLETED" && item.status !== "CANCELLED" && (
+                              <span className="text-xs font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                                {"\u26a0"} Expiring Soon
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

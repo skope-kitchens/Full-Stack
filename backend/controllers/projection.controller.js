@@ -20,7 +20,11 @@ export const createProjection = async (req, res) => {
       return res.status(403).json({ message: "Only brand clients can submit projections" });
     }
 
-    const { type, forDate, items } = req.body || {};
+    const { type, forDate, items, branchCode } = req.body || {};
+
+    if (!branchCode || !String(branchCode).trim()) {
+      return res.status(400).json({ message: "branchCode is required" });
+    }
 
     if (!type || !["DAILY", "WEEKLY"].includes(type)) {
       return res.status(400).json({ message: "type must be DAILY or WEEKLY" });
@@ -51,6 +55,8 @@ export const createProjection = async (req, res) => {
     const projection = await Projection.create({
       brandId: req.user._id,
       brandName: req.user.brandName,
+      branchCode: String(branchCode).trim(),
+      submittedAt: new Date(),
       type,
       forDate: new Date(forDate),
       items: cleaned,
@@ -96,6 +102,7 @@ export const getPendingProjections = async (req, res) => {
     const q = { status: "PENDING_CHEF_REVIEW" };
     if (brandName) q.brandName = String(brandName).trim();
     if (brandId) q.brandId = brandId;
+    if (req.user.role === "RECIPE_MANAGER") q.branchCode = req.user.branchCode;
 
     const list = await Projection.find(q)
       .sort({ forDate: 1, createdAt: 1 })
@@ -377,6 +384,9 @@ export const convertProjectionToProductionOrder = async (req, res) => {
       projectionId: projection._id,
       brandId: projection.brandId,
       brandName: projection.brandName,
+      // Captures which kitchen is preparing this batch — used later to credit
+      // the correct kitchen's fridge (SEMI_FINISHED stock) on completion.
+      branchCode: req.user?.branchCode || null,
       scaledTargetQty: Number(scaledTargetQty || 0),
       status: "AWAITING_BRAND_PAYMENT",
       financials: {

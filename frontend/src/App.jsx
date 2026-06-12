@@ -27,6 +27,7 @@ import AddTrainingRecipe from "./pages/AddTrainingRecipe";
 import GoogleSuccess from "./pages/GoogleSuccess";
 import ProjectionForm from "./pages/ProjectionForm";
 import ProjectionReview from "./pages/admin/ProjectionReview";
+import FridgeAudit from "./pages/FridgeAudit";
 function App() {
   return (
     <Router
@@ -65,6 +66,7 @@ function App() {
         <Route path="/google-success" element={<GoogleSuccess />}/>
         <Route path="/projection" element={<ProjectionForm />}/>
         <Route path="/admin/projection/:brandId" element={<ProjectionReview />}/>
+        <Route path="/fridge-audit" element={<FridgeAudit />}/>
       </Routes>
     </Router>
   )

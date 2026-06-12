@@ -248,9 +248,33 @@ export const completeBatchPreparation = async (req, res) => {
       });
     }
 
+    // Branch the cooked food belongs to — taken from the order (set when the chef
+    // confirmed the projection), falling back to the completing chef's own branch.
+    const branchCode = order.branchCode || req.user?.branchCode || null;
+
+    // Tracks what actually happened to the fridge so the frontend can show an
+    // accurate message instead of always claiming "fridge updated".
+    const fridgeUpdated = [];
+    const fridgeSkipped = [];
+
     // Upsert kitchen fridge stock for each prepared sub-recipe
     for (const item of order.subRecipesToPrepare) {
-      if (!item.batchesToPrepare || item.batchesToPrepare <= 0) continue;
+      if (!item.batchesToPrepare || item.batchesToPrepare <= 0) {
+        fridgeSkipped.push({ subRecipeName: item.subRecipeName, reason: "No additional batches were required" });
+        continue;
+      }
+
+      // No branch code could be resolved for this order/chef — most likely the chef's
+      // login session predates branch-code assignment. Refuse to write a SEMI_FINISHED
+      // record with branchCode: null, since it would be invisible to the Fridge Audit
+      // page. Surface this clearly instead of silently "succeeding".
+      if (!branchCode) {
+        fridgeSkipped.push({
+          subRecipeName: item.subRecipeName,
+          reason: "No branch code on this account — log out and log back in, then contact admin to re-run this step",
+        });
+        continue;
+      }
 
       const subRecipe =
         (await SubRecipe.findOne({
@@ -263,6 +287,7 @@ export const completeBatchPreparation = async (req, res) => {
         console.warn(
           `[CompleteBatch] Sub-recipe not found: "${item.subRecipeName}" — skipping fridge increment`
         );
+        fridgeSkipped.push({ subRecipeName: item.subRecipeName, reason: "Sub-recipe not found in recipe database" });
         continue;
       }
 
@@ -278,9 +303,11 @@ export const completeBatchPreparation = async (req, res) => {
           itemName: item.subRecipeName,
           location: "SEMI_FINISHED",
           status: "Pending",
+          branchCode,
         },
         {
           $inc: { qtyRemaining: qtyProduced },
+          $set: { uom: yieldUom },
           $push: {
             history: {
               type: "RECEIVED",
@@ -293,12 +320,14 @@ export const completeBatchPreparation = async (req, res) => {
             },
           },
           $setOnInsert: {
-            branchCode: "JP_NAGAR",
+            ownedBy: order.brandName,
             inventoryManaged: true,
           },
         },
         { upsert: true }
       );
+
+      fridgeUpdated.push({ subRecipeName: item.subRecipeName, qty: qtyProduced, uom: yieldUom });
     }
 
     // Advance both documents to COMPLETED
@@ -309,10 +338,11 @@ export const completeBatchPreparation = async (req, res) => {
 
     console.log(
       `[CompleteBatchPreparation] ProductionOrder ${id} → COMPLETED ` +
-      `(brand: "${order.brandName}", subRecipes: ${order.subRecipesToPrepare.length})`
+      `(brand: "${order.brandName}", subRecipes: ${order.subRecipesToPrepare.length}, ` +
+      `fridgeUpdated: ${fridgeUpdated.length}, fridgeSkipped: ${fridgeSkipped.length})`
     );
 
-    return res.json({ success: true, data: order });
+    return res.json({ success: true, data: order, fridgeUpdated, fridgeSkipped });
   } catch (err) {
     console.error("completeBatchPreparation error:", err?.message || err);
     return res.status(500).json({ message: "Failed to complete batch preparation" });

@@ -6,6 +6,14 @@ export const listBrandStock = async (req, res) => {
     const { brandName } = req.query || {};
     const q = {};
     if (brandName) q.brandName = String(brandName).trim();
+
+    // RECIPE_MANAGER's Inventory screen is for branch-wise kitchen raw ingredients only —
+    // exclude the fridge (SEMI_FINISHED), which now has its own dedicated Fridge Audit page.
+    if (req.user?.role === "RECIPE_MANAGER") {
+      q.location = "BRANCH_KITCHEN";
+      if (req.user?.branchCode) q.branchCode = req.user.branchCode;
+    }
+
     const list = await BrandStock.find(q).sort({ itemName: 1 }).lean();
     const normalized = (list || []).map((d) => ({
       ...d,
@@ -110,7 +118,12 @@ export const transferBrandStock = async (req, res) => {
 
     // Destination credit — atomic with source debit inside the same transaction.
     // If this throws, the transaction aborts and the source debit is rolled back.
-    const destFilter = { brandName: to, itemName: item };
+    const destFilter = {
+      brandName: to,
+      itemName: item,
+      location: fromDoc.location || "BRANCH_KITCHEN",
+      branchCode: String(fromDoc.branchCode || "JPNAGAR").trim().toUpperCase(),
+    };
     if (ingBrand) destFilter.ingredientBrand = ingBrand;
 
     const toDoc = await BrandStock.findOneAndUpdate(
@@ -120,8 +133,6 @@ export const transferBrandStock = async (req, res) => {
           uom: unit || fromDoc.uom,
           status: "Pending",
           ownedBy: to,
-          location: fromDoc.location || "BRANCH_KITCHEN",
-          branchCode: fromDoc.branchCode || "JP_NAGAR",
         },
         $inc: { qtyRemaining: quantity },
         $push: {

@@ -167,9 +167,6 @@ Skope Kitchens is a cloud kitchen operations company based in Bangalore, India. 
 
 ### 5. Known Bugs — Priority Order
 
-**P0 — Production Crash Risk (Fix First)**
-- Circular reference in recipe expansion — expandItem() in costing.controller.js and admin.recipes.controller.js has NO circular reference protection. Circular sub-recipe references confirmed in production data. Any expansion on a circular recipe CRASHES the Node.js process.
-
 **P1 — Data Corruption Risks**
 - Transfer half-commit — source debit atomic, destination credit separate. If credit fails, stock disappears permanently.
 - Wallet balance TOCTOU — concurrent pay requests can both pass balance check and double-spend.
@@ -194,7 +191,7 @@ Skope Kitchens is a cloud kitchen operations company based in Bangalore, India. 
 - `authMiddleware` — 2nd most connected node (27 edges). Handle with EXTREME care.
 - `router` — Most connected node (31 edges). Route changes affect entire app.
 - `AdminDashboard` — 21 edges. Already overloaded. Do NOT add more responsibilities.
-- `expandItem()` — Hotspot in recipe/BOM logic. Changes here have wide impact. Currently has circular reference crash bug.
+- `expandItem()` — Hotspot in recipe/BOM logic. Changes here have wide impact. Circular reference protection (visited-set cycle guard) is in place.
 - Community 8 (stock/inventory) — Most internally consistent. Keep it that way.
 - Communities 0, 1, 2 — Low cohesion. Be careful when working here.
 - 89 isolated nodes with 1 connection — undocumented entry points.
@@ -236,7 +233,6 @@ Critical issues:
 ### 10. Implementation Roadmap
 
 **Phase 0 — Fix Live Risks FIRST**
-- Circular reference protection in costing + admin expansion
 - Fix RECIPE_MANAGER role on transfer/archive routes
 - Fix wallet balance TOCTOU
 - Add /debug/db auth gate
@@ -277,6 +273,40 @@ A Cloud Kitchen Operating System (CKOS) — a vertical ERP for multi-brand cloud
 
 ## Golden Rule
 The founder's only goal is a fully working project. Every decision you make should serve that goal. Write real code. Fix real bugs. Build real features. Make it work.
+
+---
+
+## 12. Feature Log — Purchase Register (built)
+
+**What it is:** A new collection (`purchase_register`) that tracks every vendor-bought ingredient batch per client brand — item name, ingredient/manufacturer brand (e.g. Amul, Tata), quantity, unit, price, expiry date, optional vendor name. Kept fully separate from `brand_stocks` so there is no dual-source-of-truth.
+
+**Where it lives in the app:**
+- **Adding stock:** Hamburger menu → "Purchase Register" (right after "Stock Update"). Ingredient Admin (INGREDIENT_MANAGER) picks a brand, enters batch details. Doesn't matter which brand category (A/B/C) procures — data entry is the same for all.
+- **Viewing stock:** Brand Drawer → "Purchase Register Stock" button (below Warehouse Dispatch). Opens a popup table of that brand's batches, sorted by expiry. Includes an "Alert" column flagging anything expiring within **5 days** (`EXPIRY_WARNING_DAYS = 5`).
+
+**Core logic:**
+- **FEFO (First-Expiry-First-Out):** stock is consumed oldest-expiry-first.
+- **Auto-deduction:** hooked into the existing `issueIndentItem` flow (`backend/controllers/ingredientIndent.controller.js`). When the Ingredient Admin issues stock to a kitchen against an indent, the same quantity is deducted from the Purchase Register via FEFO. The branch code from the indent is recorded on each deduction (for "which kitchen used how much" analytics).
+- **Unit conversion:** if the purchase unit differs from the indent unit, it auto-converts (KG↔GM, L↔ML). If units are unknown/incompatible, it falls back to treating them as the same (no hard failure).
+- **Non-blocking by design:** the deduction is best-effort, wrapped in try/catch. If it fails or stock runs short, the indent issue still completes normally — only a warning is logged. This was deliberate so Purchase Register issues never put the existing P1-flagged indent/brand_stocks flow at risk.
+- **Audit-safe:** no destructive edit/delete. Corrections are recorded as `CORRECTION` history entries. A batch can only be cancelled if nothing has been deducted from it yet (`qtyRemaining === qtyPurchased`).
+
+**Files involved:**
+- `backend/models/purchaseRegister.js`, `backend/utils/uomConvert.js`, `backend/controllers/purchaseRegister.controller.js`, `backend/routes/purchaseRegister.routes.js`
+- `backend/controllers/ingredientIndent.controller.js` — auto-deduction hook in `issueIndentItem`
+- `frontend/src/pages/AdminDashboard.jsx` — "Purchase Register" menu item + entry modal
+- `frontend/src/pages/BrandDrawer.jsx` — "Purchase Register Stock" button + stock view modal
+
+---
+
+## 13. Planned Feature That Depends on Purchase Register (NOT yet built)
+
+**Low-stock auto-indent assist:** When a brand's Purchase Register stock is too low to fully cover an indent, the system should:
+1. Issue the kitchen whatever quantity currently exists in the Purchase Register.
+2. Automatically create/save an indent record for the shortfall (the missing quantity), so it isn't lost.
+3. Let the Ingredient Admin review these shortfall records later, and either download/note them for purchasing from the vendor, or update them once new stock is entered into the Purchase Register.
+
+This depends entirely on the Purchase Register collection, FEFO deduction logic, and unit-conversion helper already built above. Explicitly deferred by the founder to a future session — do not build until requested.
 
 
 ## graphify
