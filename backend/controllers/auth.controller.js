@@ -400,12 +400,18 @@ export const login = async (req, res) => {
           adminId: adminUser._id,
           role: adminUser.role,
           admin: true,
+          branchCode: adminUser.branchCode || null,
+          warehouseId: adminUser.warehouseId || null,
+          branchCodes: adminUser.branchCodes || [],
         });
         return res.json({
           userType: "admin",
           token,
           role: adminUser.role,
           name: adminUser.name,
+          branchCode: adminUser.branchCode || null,
+          warehouseId: adminUser.warehouseId || null,
+          branchCodes: adminUser.branchCodes || [],
         });
       }
 

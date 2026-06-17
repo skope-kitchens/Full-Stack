@@ -3,7 +3,7 @@ import User from "../models/user.js";
 import BrandStock from "../models/brandStock.js";
 import SubRecipe from "../models/subrecipe.models.js";
 import Projection from "../models/projection.js";
-import { escapeRegex } from "../utils/bomExpander.js";
+import { escapeRegex, extractIngredientsFromBOM, aggregateIngredients } from "../utils/bomExpander.js";
 
 /**
  * PATCH /api/production-orders/:id/request-payment
@@ -241,16 +241,46 @@ export const completeBatchPreparation = async (req, res) => {
     if (!order) {
       return res.status(404).json({ message: "Production order not found" });
     }
-    if (order.status !== "IN_PREPARATION") {
+    if (!["IN_PREPARATION", "READY_TO_COOK"].includes(order.status)) {
       return res.status(400).json({
         message: `Cannot complete: order status is "${order.status}"`,
         currentStatus: order.status,
       });
     }
 
+    // Branch the cooked food belongs to — taken from the order (set when the chef
+    // confirmed the projection), falling back to the completing chef's own branch.
+    const branchCode = order.branchCode || req.user?.branchCode || null;
+
+    // Tracks what actually happened to the fridge so the frontend can show an
+    // accurate message instead of always claiming "fridge updated".
+    const fridgeUpdated = [];
+    const fridgeSkipped = [];
+
+    // Tracks Branch Kitchen raw-ingredient deductions caused by this batch's BOM.
+    // Only ingredients that are actually part of the prepared sub-recipe(s) are
+    // touched — anything else in the kitchen's BRANCH_KITCHEN stock is untouched.
+    const ingredientsDeducted = [];
+    const ingredientsSkipped = [];
+
     // Upsert kitchen fridge stock for each prepared sub-recipe
     for (const item of order.subRecipesToPrepare) {
-      if (!item.batchesToPrepare || item.batchesToPrepare <= 0) continue;
+      if (!item.batchesToPrepare || item.batchesToPrepare <= 0) {
+        fridgeSkipped.push({ subRecipeName: item.subRecipeName, reason: "No additional batches were required" });
+        continue;
+      }
+
+      // No branch code could be resolved for this order/chef — most likely the chef's
+      // login session predates branch-code assignment. Refuse to write a SEMI_FINISHED
+      // record with branchCode: null, since it would be invisible to the Fridge Audit
+      // page. Surface this clearly instead of silently "succeeding".
+      if (!branchCode) {
+        fridgeSkipped.push({
+          subRecipeName: item.subRecipeName,
+          reason: "No branch code on this account — log out and log back in, then contact admin to re-run this step",
+        });
+        continue;
+      }
 
       const subRecipe =
         (await SubRecipe.findOne({
@@ -263,6 +293,7 @@ export const completeBatchPreparation = async (req, res) => {
         console.warn(
           `[CompleteBatch] Sub-recipe not found: "${item.subRecipeName}" — skipping fridge increment`
         );
+        fridgeSkipped.push({ subRecipeName: item.subRecipeName, reason: "Sub-recipe not found in recipe database" });
         continue;
       }
 
@@ -278,9 +309,11 @@ export const completeBatchPreparation = async (req, res) => {
           itemName: item.subRecipeName,
           location: "SEMI_FINISHED",
           status: "Pending",
+          branchCode,
         },
         {
           $inc: { qtyRemaining: qtyProduced },
+          $set: { uom: yieldUom },
           $push: {
             history: {
               type: "RECEIVED",
@@ -293,12 +326,76 @@ export const completeBatchPreparation = async (req, res) => {
             },
           },
           $setOnInsert: {
-            branchCode: "JP_NAGAR",
+            ownedBy: order.brandName,
             inventoryManaged: true,
           },
         },
         { upsert: true }
       );
+
+      fridgeUpdated.push({ subRecipeName: item.subRecipeName, qty: qtyProduced, uom: yieldUom });
+
+      // Deduct the raw ingredients this sub-recipe's BOM actually consumed from
+      // Branch Kitchen stock — anything not part of this BOM is left untouched.
+      const rawLeaves = await extractIngredientsFromBOM(
+        subRecipe.items,
+        item.batchesToPrepare,
+        order.brandName,
+        new Set()
+      );
+      const aggregated = aggregateIngredients(rawLeaves);
+
+      for (const ing of aggregated.values()) {
+        const stockDoc = await BrandStock.findOne({
+          brandName: order.brandName,
+          itemName: new RegExp(`^${escapeRegex(ing.itemName)}$`, "i"),
+          location: "BRANCH_KITCHEN",
+          branchCode,
+          status: "Pending",
+        });
+
+        if (!stockDoc || Number(stockDoc.qtyRemaining || 0) <= 0) {
+          ingredientsSkipped.push({
+            itemName: ing.itemName,
+            reason: "No Branch Kitchen stock found for this ingredient",
+          });
+          continue;
+        }
+
+        const deductQty = Math.min(Number(ing.qty || 0), Number(stockDoc.qtyRemaining || 0));
+        if (deductQty <= 0) continue;
+
+        await BrandStock.updateOne(
+          { _id: stockDoc._id },
+          {
+            $inc: { qtyRemaining: -deductQty },
+            $push: {
+              history: {
+                type: "TRANSFER_OUT",
+                qty: deductQty,
+                uom: ing.uom || stockDoc.uom,
+                at: new Date(),
+                referenceId: order._id,
+                referenceKind: "BATCH",
+                note: `Consumed producing ${item.batchesToPrepare} batch(es) of ${item.subRecipeName}`,
+              },
+            },
+          }
+        );
+
+        ingredientsDeducted.push({
+          itemName: ing.itemName,
+          qty: Number(deductQty.toFixed(4)),
+          uom: ing.uom || stockDoc.uom,
+        });
+
+        if (deductQty < ing.qty) {
+          ingredientsSkipped.push({
+            itemName: ing.itemName,
+            reason: `Only ${deductQty} of ${ing.qty} ${ing.uom} available — remaining shortfall not deducted`,
+          });
+        }
+      }
     }
 
     // Advance both documents to COMPLETED
@@ -309,10 +406,12 @@ export const completeBatchPreparation = async (req, res) => {
 
     console.log(
       `[CompleteBatchPreparation] ProductionOrder ${id} → COMPLETED ` +
-      `(brand: "${order.brandName}", subRecipes: ${order.subRecipesToPrepare.length})`
+      `(brand: "${order.brandName}", subRecipes: ${order.subRecipesToPrepare.length}, ` +
+      `fridgeUpdated: ${fridgeUpdated.length}, fridgeSkipped: ${fridgeSkipped.length}, ` +
+      `ingredientsDeducted: ${ingredientsDeducted.length}, ingredientsSkipped: ${ingredientsSkipped.length})`
     );
 
-    return res.json({ success: true, data: order });
+    return res.json({ success: true, data: order, fridgeUpdated, fridgeSkipped, ingredientsDeducted, ingredientsSkipped });
   } catch (err) {
     console.error("completeBatchPreparation error:", err?.message || err);
     return res.status(500).json({ message: "Failed to complete batch preparation" });
@@ -336,6 +435,34 @@ export const getActiveProductionOrders = async (req, res) => {
     return res.json({ success: true, data: orders });
   } catch (err) {
     console.error("getActiveProductionOrders error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to fetch active production orders" });
+  }
+};
+
+/**
+ * GET /api/production-orders/my-active
+ * RECIPE_MANAGER only.
+ * Returns this chef's branch's production orders that are not yet COMPLETED —
+ * i.e. everything currently moving through the kitchen pipeline, scoped to
+ * req.user.branchCode so a chef only sees their own branch's queue.
+ */
+export const getMyActiveProductionOrders = async (req, res) => {
+  try {
+    const branchCode = req.user?.branchCode;
+    if (!branchCode) {
+      return res.status(400).json({ message: "No branch code on this account — contact admin" });
+    }
+
+    const orders = await ProductionOrder.find({
+      branchCode,
+      status: { $ne: "COMPLETED" },
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({ success: true, data: orders });
+  } catch (err) {
+    console.error("getMyActiveProductionOrders error:", err?.message || err);
     return res.status(500).json({ message: "Failed to fetch active production orders" });
   }
 };

@@ -25,6 +25,7 @@ const AdminDashboard = () => {
   const [showFcrModal, setShowFcrModal] = useState(false);
   const [showCheckStockModal, setShowCheckStockModal] = useState(false);
   const [showStockUpdateModal, setShowStockUpdateModal] = useState(false);
+  const [showPurchaseRegisterModal, setShowPurchaseRegisterModal] = useState(false);
   const navigate = useNavigate();
   const search = typeof window !== "undefined" ? window.location.search : "";
 
@@ -42,6 +43,29 @@ const AdminDashboard = () => {
   const isWalletManager = adminRole === "WALLET_MANAGER";
   const isRecipeManager = adminRole === "RECIPE_MANAGER";
   const isIngredientManager = adminRole === "INGREDIENT_MANAGER";
+
+  const branchCode = authUtils.getBranchCode();
+  const warehouseId = authUtils.getWarehouseId();
+  const branchCodes = authUtils.getBranchCodes();
+
+  // Convert codes like "TESTBRANCH" or "JPNAGAR" into readable labels
+  // ("Test Branch", "JP Nagar") for display under the dashboard heading.
+  const formatLocationName = (code) => {
+    if (!code) return "";
+    const overrides = {
+      JPNAGAR: "JP Nagar",
+      MARATHAHALLI: "Marathahalli",
+      KALYANNAGAR: "Kalyan Nagar",
+      TESTBRANCH: "Test Branch",
+      TESTWAREHOUSE: "Test Warehouse",
+    };
+    if (overrides[code]) return overrides[code];
+    return code
+      .toLowerCase()
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
 
   const hasMenuOptions = isRecipeManager || isIngredientManager;
   const canManageBrand = isWalletManager || isRecipeManager || isIngredientManager;
@@ -75,7 +99,7 @@ const AdminDashboard = () => {
   return (
     <Layout>
       <div className="max-w-7xl mx-auto px-6 py-8 relative min-h-screen">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-1">
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
 
           <div className="flex items-center gap-3 relative">
@@ -190,7 +214,16 @@ const AdminDashboard = () => {
                         >
                           FCR
                         </button>
-                        
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMenu(false);
+                            navigate("/fridge-audit");
+                          }}
+                          className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                        >
+                          Fridge Audit
+                        </button>
                       </>
                     )}
                     {isIngredientManager && (
@@ -270,6 +303,18 @@ const AdminDashboard = () => {
                         Stock Update
                       </button>
                     )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowPurchaseRegisterModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Purchase Register
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -283,6 +328,35 @@ const AdminDashboard = () => {
             </button>
           </div>
         </div>
+
+        {(branchCode || warehouseId || branchCodes.length > 0) && (
+          <div className="mb-6 text-sm text-gray-600">
+            {isRecipeManager && branchCode && (
+              <span>
+                Branch: <span className="font-semibold">{formatLocationName(branchCode)}</span>
+                {warehouseId && (
+                  <>
+                    {" "}&middot; Supplied by warehouse:{" "}
+                    <span className="font-semibold">{formatLocationName(warehouseId)}</span>
+                  </>
+                )}
+              </span>
+            )}
+            {isIngredientManager && warehouseId && (
+              <span>
+                Warehouse: <span className="font-semibold">{formatLocationName(warehouseId)}</span>
+                {branchCodes.length > 0 && (
+                  <>
+                    {" "}&middot; Supplies branches:{" "}
+                    <span className="font-semibold">
+                      {branchCodes.map(formatLocationName).join(", ")}
+                    </span>
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Brand list visible to all admin roles; drawer only for wallet/order managers */}
         <BrandList
@@ -349,6 +423,11 @@ const AdminDashboard = () => {
         {/* Stock Update modal for ingredient manager */}
         {isIngredientManager && showStockUpdateModal && (
           <StockUpdateModal onClose={() => setShowStockUpdateModal(false)} />
+        )}
+
+        {/* Purchase Register modal for ingredient manager */}
+        {isIngredientManager && showPurchaseRegisterModal && (
+          <PurchaseRegisterModal onClose={() => setShowPurchaseRegisterModal(false)} />
         )}
 
         {/* FCR breakdown modal */}
@@ -1015,6 +1094,7 @@ const MAP_TAB_MAIN = "main";
 const MAP_TAB_SUB = "sub";
 const MAP_TAB_TRIAL = "trial";
 const MAP_TAB_TRAINING = "training";
+const MAP_TAB_CUSTOM = "custom";
 
 function MapIngredientsModal({ onClose }) {
   const [tab, setTab] = useState(MAP_TAB_MAIN);
@@ -1046,6 +1126,76 @@ function MapIngredientsModal({ onClose }) {
 
   const [rows, setRows] = useState([emptyRow()]);
   const [saving, setSaving] = useState(false);
+
+  // Custom (manual) indent — independent rows, not tied to any recipe
+  const [customRows, setCustomRows] = useState([emptyRow()]);
+  const [savingCustom, setSavingCustom] = useState(false);
+  const addCustomRow = () => setCustomRows((prev) => [...prev, emptyRow()]);
+  const updateCustomRow = (index, patch) => {
+    setCustomRows((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  };
+  const removeCustomRow = (index) => {
+    setCustomRows((prev) => prev.filter((_, i) => i !== index));
+  };
+  const onSelectCustomIngredient = (index, itemName) => {
+    if (itemName === "__CUSTOM__") {
+      updateCustomRow(index, { itemName: "", skuCode: "", categoryName: "", uom: "" });
+      return;
+    }
+    const match = inventoryItems.find((it) => it.name === itemName);
+    updateCustomRow(index, {
+      itemName,
+      customItemName: "",
+      skuCode: match?.skuCode || "",
+      categoryName: match?.categoryName || "",
+      uom: match?.measuringUnit || "",
+    });
+  };
+
+  const handleSaveCustom = async () => {
+    if (!branchCode) return;
+    if (!clientBrandName.trim()) return;
+
+    const mappedRows = customRows.map((r) => ({
+      skuCode: r.skuCode,
+      itemName: (r.itemName || r.customItemName || "").trim(),
+      ingredientBrand: String(r.ingredientBrand || "").trim(),
+      categoryName: r.categoryName,
+      uom: r.uom,
+      qty: Number(r.qty || 0),
+    }));
+
+    const items = mappedRows.filter(
+      (r) => r.itemName && r.ingredientBrand && r.uom && r.categoryName && r.qty > 0
+    );
+
+    if (items.length === 0) {
+      window.alert("Add at least one ingredient with Name, Brand, Category, UOM and Qty.");
+      return;
+    }
+
+    setSavingCustom(true);
+    try {
+      await api.post("/api/ingredient-indent", {
+        recipeKind: "manual",
+        branchCode,
+        clientBrandName: clientBrandName.trim(),
+        clientBrandId,
+        items,
+      });
+      setCustomRows([emptyRow()]);
+      onClose();
+    } catch (err) {
+      console.error("Failed to send custom indent", err);
+      toast.error(err.response?.data?.message || "Failed to send indent");
+    } finally {
+      setSavingCustom(false);
+    }
+  };
 
   useEffect(() => {
     const fetchLists = async () => {
@@ -1230,16 +1380,32 @@ function MapIngredientsModal({ onClose }) {
     if (!selectedRecipe?._id) return;
     if (!branchCode) return;
     if (!clientBrandName.trim()) return;
-    const items = rows
-      .map((r) => ({
-        skuCode: r.skuCode,
-        itemName: (r.itemName || r.customItemName || "").trim(),
-        ingredientBrand: String(r.ingredientBrand || "").trim(),
-        categoryName: r.categoryName,
-        uom: r.uom,
-        qty: Number(r.qty || 0),
-      }))
-      .filter((r) => r.itemName && r.ingredientBrand && r.uom && r.categoryName);
+    const mappedRows = rows.map((r) => ({
+      skuCode: r.skuCode,
+      itemName: (r.itemName || r.customItemName || "").trim(),
+      ingredientBrand: String(r.ingredientBrand || "").trim(),
+      categoryName: r.categoryName,
+      uom: r.uom,
+      qty: Number(r.qty || 0),
+    }));
+
+    const items = mappedRows.filter(
+      (r) => r.itemName && r.ingredientBrand && r.uom && r.categoryName
+    );
+
+    // Items with a name but missing required fields (brand/uom/category) are
+    // silently dropped from the indent — warn the recipe admin so this doesn't
+    // go unnoticed (e.g. recipe ingredients that have no brand specified yet).
+    const skipped = mappedRows.filter(
+      (r) => r.itemName && !(r.ingredientBrand && r.uom && r.categoryName)
+    );
+    if (skipped.length > 0) {
+      const names = skipped.map((r) => r.itemName).join(", ");
+      const proceed = window.confirm(
+        `These ingredients are missing a Brand, UOM, or Category and will NOT be sent in the indent:\n\n${names}\n\nFill them in before saving, or click OK to continue without them.`
+      );
+      if (!proceed) return;
+    }
 
     setSaving(true);
     try {
@@ -1305,8 +1471,188 @@ function MapIngredientsModal({ onClose }) {
           >
             Training Recipes
           </button>
+          <button
+            onClick={() => { setTab(MAP_TAB_CUSTOM); setSelectedRecipe(null); }}
+            className={`px-6 py-3 font-medium ${tab === MAP_TAB_CUSTOM ? "border-b-2 border-black text-black" : "text-gray-500"}`}
+          >
+            Custom Indent
+          </button>
         </div>
 
+        {tab === MAP_TAB_CUSTOM ? (
+          <div className="flex-1 overflow-y-auto p-6">
+            <p className="text-gray-500 text-sm mb-4">
+              Send an indent for individual ingredients without selecting a recipe.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Branch Code
+                </label>
+                <select
+                  value={branchCode}
+                  onChange={(e) => setBranchCode(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Select branch</option>
+                  {stores.map((s) => (
+                    <option key={s.storeCode} value={s.storeCode}>
+                      {s.storeCode}{s.storeName ? ` — ${s.storeName}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Client Brand (required)
+                </label>
+                <select
+                  value={clientBrandName}
+                  onChange={(e) => setClientBrandName(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                >
+                  {clientBrands.length === 0 ? (
+                    <option value="">No brands</option>
+                  ) : (
+                    clientBrands.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+              <div className="text-sm text-gray-500 flex items-end">
+                {loadingInventory && branchCode ? "Loading inventory..." : ""}
+              </div>
+            </div>
+
+            <div className="border rounded-lg overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="p-2 text-left">Ingredient</th>
+                    <th className="p-2 text-left">Category</th>
+                    <th className="p-2 text-left">Ing Brand</th>
+                    <th className="p-2 text-left">UOM</th>
+                    <th className="p-2 text-right w-28">Qty</th>
+                    <th className="p-2 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customRows.map((r, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="p-2">
+                        <select
+                          value={r.itemName || (r.customItemName ? "__CUSTOM__" : "")}
+                          onChange={(e) => onSelectCustomIngredient(idx, e.target.value)}
+                          className="w-full border rounded px-2 py-1 text-sm"
+                          disabled={!branchCode}
+                        >
+                          <option value="">
+                            {branchCode ? "Select ingredient" : "Select branch first"}
+                          </option>
+                          <option value="__CUSTOM__">Custom ingredient...</option>
+                          {inventoryItems.map((it) => (
+                            <option key={it.skuCode || it.name} value={it.name}>
+                              {it.name}
+                            </option>
+                          ))}
+                        </select>
+                        {!r.itemName && (
+                          <input
+                            type="text"
+                            value={r.customItemName}
+                            onChange={(e) =>
+                              updateCustomRow(idx, { customItemName: e.target.value })
+                            }
+                            placeholder="Enter ingredient name"
+                            className="mt-2 w-full border rounded px-2 py-1 text-sm"
+                          />
+                        )}
+                      </td>
+                      <td className="p-2">
+                        <select
+                          value={r.categoryName || ""}
+                          onChange={(e) =>
+                            updateCustomRow(idx, { categoryName: e.target.value })
+                          }
+                          className="w-full border rounded px-2 py-1 text-sm"
+                        >
+                          <option value="">Select</option>
+                          <option value="Food">Food</option>
+                          <option value="Packaging">Packaging</option>
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="text"
+                          value={r.ingredientBrand}
+                          onChange={(e) =>
+                            updateCustomRow(idx, { ingredientBrand: e.target.value })
+                          }
+                          placeholder="e.g. Tata"
+                          className="w-full border rounded px-2 py-1 text-sm"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <select
+                          value={r.uom || ""}
+                          onChange={(e) => updateCustomRow(idx, { uom: e.target.value })}
+                          className="w-full border rounded px-2 py-1 text-sm"
+                        >
+                          <option value="">Select</option>
+                          <option value="ML">ml</option>
+                          <option value="GM">gm</option>
+                          <option value="PC">piece</option>
+                          <option value="KG">KG</option>
+                        </select>
+                      </td>
+                      <td className="p-2 text-right">
+                        <input
+                          type="number"
+                          className="w-24 border rounded px-2 py-1 text-right text-sm"
+                          value={r.qty}
+                          onChange={(e) => updateCustomRow(idx, { qty: e.target.value })}
+                        />
+                      </td>
+                      <td className="p-2 text-center">
+                        {customRows.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeCustomRow(idx)}
+                            className="text-red-500 hover:text-red-700"
+                            title="Remove row"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between mt-4">
+              <button
+                type="button"
+                onClick={addCustomRow}
+                className="text-blue-600 text-sm font-medium hover:underline"
+              >
+                + Add Ingredient
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCustom}
+                disabled={savingCustom || !branchCode || !clientBrandName.trim()}
+                className="bg-black text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+              >
+                {savingCustom ? "Sending..." : "Send Request to Store"}
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="flex-1 overflow-hidden flex min-h-0">
           <div className="w-72 border-r overflow-y-auto p-4">
             {loadingList ? (
@@ -1502,6 +1848,7 @@ function MapIngredientsModal({ onClose }) {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -1542,9 +1889,9 @@ function IngredientInventoryModal({ onClose }) {
     fetchRows(tab);
   }, [tab]);
 
-  const verify = async (id) => {
+  const verify = async (id, costOverride) => {
     try {
-      const cost = verifyCosts[id];
+      const cost = costOverride !== undefined ? costOverride : verifyCosts[id];
       await api.patch(`/api/ingredient-indent/${id}/verify`, { cost });
       await fetchRows("indent");
     } catch (err) {
@@ -1552,13 +1899,26 @@ function IngredientInventoryModal({ onClose }) {
     }
   };
 
-  const issue = async (id) => {
+  const issue = async (id, fulfillFromWarehouse) => {
     try {
-      await api.patch(`/api/ingredient-indent/${id}/issue`);
+      await api.patch(`/api/ingredient-indent/${id}/issue`, fulfillFromWarehouse ? { fulfillFromWarehouse: true } : {});
       await fetchRows("indent");
-      toast.success("Item issued successfully");
+      toast.success(
+        fulfillFromWarehouse ? "Issued from Warehouse Stock — no client charge" : "Item issued successfully"
+      );
     } catch (err) {
       toast.error(err.response?.data?.message || "Issue failed");
+    }
+  };
+
+  const deleteIndent = async (id) => {
+    if (!window.confirm("Delete this indent item? This cannot be undone.")) return;
+    try {
+      await api.delete(`/api/ingredient-indent/${id}`);
+      setRows((prev) => prev.filter((r) => r._id !== id));
+      toast.success("Indent item deleted");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Delete failed");
     }
   };
 
@@ -1655,13 +2015,38 @@ function IngredientInventoryModal({ onClose }) {
                       <td className="p-2">
                         <div className="font-medium">{r.recipeName || "—"}</div>
                         <div className="text-xs text-gray-500">{r.branchCode}</div>
+                        {r.indentType === "WAREHOUSE_TRANSFER" && (
+                          <div className="text-xs mt-1">
+                            <span className="bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
+                              Warehouse Transfer{r.sourceBranchCode ? ` (from ${r.sourceBranchCode})` : ""}
+                            </span>
+                          </div>
+                        )}
+                        {r.indentType === "INVENTORY_TRANSFER" && (
+                          <div className="text-xs mt-1">
+                            <span className="bg-teal-50 text-teal-700 border border-teal-200 px-1.5 py-0.5 rounded">
+                              Warehouse Stock Transfer (prepaid)
+                            </span>
+                          </div>
+                        )}
                       </td>
-                      <td className="p-2">{r.itemName}</td>
+                      <td className="p-2">
+                        {r.itemName}
+                        {Number(r.warehouseStockAvailable || 0) > 0 && (
+                          <div className="text-xs mt-1">
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
+                              In Warehouse Stock: {Number(r.warehouseStockAvailable).toFixed(2)} {r.uom || ""}
+                            </span>
+                          </div>
+                        )}
+                      </td>
                       <td className="p-2">{r.ingredientBrand || "—"}</td>
                       <td className="p-2">{r.categoryName || "—"}</td>
                       <td className="p-2">{r.uom || "—"}</td>
                       <td className="p-2 text-right">{Number(r.qty || 0)}</td>
-                      <td className="p-2 text-right">₹{Number(r.cost || 0).toFixed(2)}</td>
+                      <td className="p-2 text-right">
+                        {r.indentType === "WAREHOUSE_TRANSFER" ? "—" : `₹${Number(r.cost || 0).toFixed(2)}`}
+                      </td>
                       <td className="p-2 text-center">
                         {tab === "issue" ? (
                           <div className="flex items-center justify-center gap-2">
@@ -1677,6 +2062,15 @@ function IngredientInventoryModal({ onClose }) {
                             </button>
                           </div>
                         ) : r.status === "INDENT_PENDING" ? (
+                          r.indentType === "WAREHOUSE_TRANSFER" || r.indentType === "INVENTORY_TRANSFER" ? (
+                            <button
+                              type="button"
+                              onClick={() => verify(r._id, 0)}
+                              className="bg-black text-white px-3 py-1.5 rounded text-xs hover:bg-gray-800"
+                            >
+                              Verify Transfer
+                            </button>
+                          ) : (
                           <div className="flex items-center justify-center gap-2">
                             <input
                               type="number"
@@ -1699,17 +2093,49 @@ function IngredientInventoryModal({ onClose }) {
                               Verify
                             </button>
                           </div>
+                          )
                         ) : (
                           <div className="flex items-center justify-center gap-2">
                             <span className="text-xs text-blue-700 bg-blue-50 border border-blue-200 px-2 py-1 rounded">
                               Verified
                             </span>
+                            {(!r.indentType || r.indentType === "PROCUREMENT") &&
+                            Number(r.warehouseStockAvailable || 0) < Number(r.qty || 0) ? (
+                              <span className="text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-1 rounded">
+                                Out of Stock
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => issue(r._id)}
+                                className="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700"
+                              >
+                                Issue
+                              </button>
+                            )}
+                            {Number(r.warehouseStockAvailable || 0) >= Number(r.qty || 0) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      "This will fulfill the indent from the brand's Warehouse Stock (Purchase Register) instead of new procurement. Cost will be set to ₹0 — the client will not be charged. Continue?"
+                                    )
+                                  ) {
+                                    issue(r._id, true);
+                                  }
+                                }}
+                                className="bg-amber-600 text-white px-3 py-1.5 rounded text-xs hover:bg-amber-700"
+                              >
+                                Fulfill from Warehouse Stock
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => issue(r._id)}
-                              className="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700"
+                              onClick={() => deleteIndent(r._id)}
+                              className="text-xs text-red-600 hover:underline"
                             >
-                              Issue
+                              Delete
                             </button>
                           </div>
                         )}
@@ -1738,8 +2164,11 @@ function IngredientInventoryModal({ onClose }) {
 
 /* ---------- GRN MODAL (Recipe admin view of issued items) ---------- */
 function GrnModal({ onClose }) {
+  const [grnTab, setGrnTab] = useState("issued"); // issued | pending
   const [rows, setRows] = useState([]);
+  const [pendingRows, setPendingRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pendingLoading, setPendingLoading] = useState(true);
   const [ingredientName, setIngredientName] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -1761,6 +2190,28 @@ function GrnModal({ onClose }) {
     load();
   }, []);
 
+  useEffect(() => {
+    if (grnTab !== "pending") return;
+    const loadPending = async () => {
+      setPendingLoading(true);
+      try {
+        const res = await api.get("/api/ingredient-indent");
+        const list = (res.data?.data || []).filter(
+          (r) =>
+            (r.status === "INDENT_PENDING" || r.status === "INDENT_VERIFIED") &&
+            (!r.indentType || r.indentType === "PROCUREMENT")
+        );
+        setPendingRows(list);
+      } catch (err) {
+        console.error("Failed to load pending indents", err);
+        setPendingRows([]);
+      } finally {
+        setPendingLoading(false);
+      }
+    };
+    loadPending();
+  }, [grnTab]);
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-2xl w-[95vw] max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -1773,6 +2224,27 @@ function GrnModal({ onClose }) {
             ✕
           </button>
         </div>
+        <div className="flex border-b">
+          <button
+            type="button"
+            onClick={() => setGrnTab("issued")}
+            className={`px-6 py-3 font-medium ${
+              grnTab === "issued" ? "border-b-2 border-black text-black" : "text-gray-500"
+            }`}
+          >
+            Issued
+          </button>
+          <button
+            type="button"
+            onClick={() => setGrnTab("pending")}
+            className={`px-6 py-3 font-medium ${
+              grnTab === "pending" ? "border-b-2 border-black text-black" : "text-gray-500"
+            }`}
+          >
+            My Indent Requests
+          </button>
+        </div>
+        {grnTab === "issued" ? (
         <div className="flex-1 overflow-auto p-6">
           <div className="mb-4 flex flex-wrap items-end gap-3">
             <div>
@@ -1861,6 +2333,68 @@ function GrnModal({ onClose }) {
             </table>
           </div>
         </div>
+        ) : (
+        <div className="flex-1 overflow-auto p-6">
+          <div className="border rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="p-2 text-left">Brand</th>
+                  <th className="p-2 text-left">Recipe</th>
+                  <th className="p-2 text-left">Ingredient</th>
+                  <th className="p-2 text-left">Ing Brand</th>
+                  <th className="p-2 text-left">UOM</th>
+                  <th className="p-2 text-right">Qty</th>
+                  <th className="p-2 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingLoading ? (
+                  <tr>
+                    <td colSpan={7} className="p-4 text-center text-gray-500">
+                      Loading...
+                    </td>
+                  </tr>
+                ) : pendingRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-4 text-center text-gray-500">
+                      No pending indent requests.
+                    </td>
+                  </tr>
+                ) : (
+                  pendingRows.map((r) => {
+                    const outOfStock = Number(r.warehouseStockAvailable || 0) < Number(r.qty || 0);
+                    return (
+                      <tr key={r._id} className="border-t">
+                        <td className="p-2">{r.requestBrandName || "—"}</td>
+                        <td className="p-2">
+                          <div className="font-medium">{r.recipeName || "—"}</div>
+                          <div className="text-xs text-gray-500">{r.branchCode}</div>
+                        </td>
+                        <td className="p-2">{r.itemName}</td>
+                        <td className="p-2">{r.ingredientBrand || "—"}</td>
+                        <td className="p-2">{r.uom || "—"}</td>
+                        <td className="p-2 text-right">{Number(r.qty || 0)}</td>
+                        <td className="p-2 text-center">
+                          {outOfStock ? (
+                            <span className="text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-1 rounded">
+                              Out of Stock
+                            </span>
+                          ) : (
+                            <span className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-1 rounded">
+                              Awaiting Issue
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        )}
         <div className="flex justify-end gap-3 p-4 border-t">
           <button
             type="button"
@@ -2388,15 +2922,16 @@ function RecipeInventoryModal({ onClose }) {
 
   const handleDeleteRow = async (rowId) => {
     if (!rowId) return;
-    const ok = window.confirm("Delete this inventory row?");
+    const ok = window.confirm("Archive this inventory row? This cannot be undone.");
     if (!ok) return;
     setDeletingId(rowId);
     try {
-      await api.delete(`/api/brand-stock/${rowId}`);
+      await api.patch(`/api/brand-stock/${rowId}/archive`);
       await loadStock(selectedBrand);
       setTransfer((p) => ({ ...p, itemName: "", ingredientBrand: "", uom: "", qty: "" }));
+      toast.success("Item archived");
     } catch (err) {
-      toast.error(err.response?.data?.message || "Delete failed");
+      toast.error(err.response?.data?.message || "Archive failed");
     } finally {
       setDeletingId(null);
     }
@@ -3221,7 +3756,7 @@ function StockUpdateModal({ onClose }) {
   useEffect(() => {
     api.get("/api/admin/brands")
       .then((res) => {
-        const list = res.data?.data || [];
+        const list = Array.isArray(res.data) ? res.data : [];
         setBrands(list);
         if (list.length) setBrandId(list[0]._id);
       })
@@ -3394,6 +3929,296 @@ function StockUpdateModal({ onClose }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- PURCHASE REGISTER MODAL ---------- */
+function PurchaseRegisterModal({ onClose }) {
+  const emptyForm = {
+    itemName: "",
+    ingredientBrand: "",
+    uom: "KG",
+    qty: "",
+    pricePerUnit: "",
+    expiryDate: "",
+    vendorName: "",
+  };
+
+  const [brands, setBrands] = useState([]);
+  const [brandId, setBrandId] = useState("");
+  const [form, setForm] = useState({ ...emptyForm });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const [stock, setStock] = useState([]);
+  const [loadingStock, setLoadingStock] = useState(false);
+
+  useEffect(() => {
+    api.get("/api/admin/brands")
+      .then((res) => {
+        const list = Array.isArray(res.data) ? res.data : [];
+        setBrands(list);
+        if (list.length) setBrandId(list[0]._id);
+      })
+      .catch(() => setBrands([]));
+  }, []);
+
+  const selectedBrand = brands.find((b) => b._id === brandId);
+
+  const loadStock = async () => {
+    if (!selectedBrand) return;
+    setLoadingStock(true);
+    try {
+      const res = await api.get(`/api/purchase-register/${encodeURIComponent(selectedBrand.brandName)}`);
+      setStock(res.data?.data || []);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to load purchase register stock.");
+      setStock([]);
+    } finally {
+      setLoadingStock(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedBrand) loadStock();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandId]);
+
+  const updateField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (!selectedBrand) return setError("Brand is required.");
+
+    const itemName = form.itemName.trim();
+    const ingredientBrand = form.ingredientBrand.trim();
+    const uom = form.uom.trim();
+    const qty = Number(form.qty);
+    const pricePerUnit = Number(form.pricePerUnit);
+
+    if (!itemName) return setError("Item name is required.");
+    if (!ingredientBrand) return setError("Ingredient brand is required.");
+    if (!uom) return setError("UOM is required.");
+    if (!Number.isFinite(qty) || qty <= 0) return setError("Quantity must be greater than 0.");
+    if (!Number.isFinite(pricePerUnit) || pricePerUnit < 0) return setError("Price must be a valid non-negative number.");
+    if (!form.expiryDate) return setError("Expiry date is required.");
+
+    setSubmitting(true);
+    try {
+      await api.post("/api/purchase-register", {
+        brandName: selectedBrand.brandName,
+        itemName,
+        ingredientBrand,
+        uom,
+        qty,
+        pricePerUnit,
+        expiryDate: form.expiryDate,
+        vendorName: form.vendorName.trim(),
+      });
+      toast.success("Purchase entry added successfully");
+      setForm({ ...emptyForm });
+      loadStock();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to add purchase entry.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Purchase Register</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-hidden flex min-h-0">
+        <form onSubmit={handleSubmit} className="w-1/2 overflow-auto p-6 space-y-5 border-r">
+          {error && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+            <select
+              value={brandId}
+              onChange={(e) => setBrandId(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+            >
+              {brands.length === 0 && <option value="">Loading brands...</option>}
+              {brands.map((b) => (
+                <option key={b._id} value={b._id}>{b.brandName}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Item Name</label>
+              <input
+                type="text"
+                value={form.itemName}
+                onChange={(e) => updateField("itemName", e.target.value)}
+                placeholder="e.g. Paneer"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ingredient Brand</label>
+              <input
+                type="text"
+                value={form.ingredientBrand}
+                onChange={(e) => updateField("ingredientBrand", e.target.value)}
+                placeholder="e.g. Amul"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.qty}
+                onChange={(e) => updateField("qty", e.target.value)}
+                placeholder="0"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">UOM</label>
+              <select
+                value={form.uom}
+                onChange={(e) => updateField("uom", e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              >
+                <option value="KG">KG</option>
+                <option value="GM">GM</option>
+                <option value="L">L</option>
+                <option value="ML">ML</option>
+                <option value="PC">PC</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Price per Unit (₹)</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.pricePerUnit}
+                onChange={(e) => updateField("pricePerUnit", e.target.value)}
+                placeholder="0.00"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+              <input
+                type="date"
+                value={form.expiryDate}
+                onChange={(e) => updateField("expiryDate", e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor Name (optional)</label>
+              <input
+                type="text"
+                value={form.vendorName}
+                onChange={(e) => updateField("vendorName", e.target.value)}
+                placeholder="e.g. Local Vendor"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Add Purchase"}
+            </button>
+          </div>
+        </form>
+
+        <div className="w-1/2 overflow-auto p-6">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">
+              Purchase Register Stock{selectedBrand ? ` — ${selectedBrand.brandName}` : ""}
+            </h3>
+            <button
+              type="button"
+              onClick={loadStock}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Refresh
+            </button>
+          </div>
+          {loadingStock ? (
+            <p className="text-sm text-gray-400 text-center">Loading stock...</p>
+          ) : stock.length === 0 ? (
+            <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center">
+              <p className="text-sm font-medium text-gray-500">No purchase entries found for this brand.</p>
+            </div>
+          ) : (
+            <div className="border rounded-lg overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Item</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Ing. Brand</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-700">Remaining</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">UOM</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Expiry</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stock.map((item, idx) => (
+                    <tr key={item._id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                      <td className="px-3 py-2 font-medium">{item.itemName}</td>
+                      <td className="px-3 py-2 text-gray-600">{item.ingredientBrand}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{Number(item.qtyRemaining || 0).toFixed(3)}</td>
+                      <td className="px-3 py-2 text-gray-500 uppercase text-xs">{item.uom}</td>
+                      <td className="px-3 py-2">
+                        {new Date(item.expiryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                        {item.expiringSoon && item.status !== "DEPLETED" && item.status !== "CANCELLED" && (
+                          <span className="ml-2 text-xs font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                            {"⚠"} Soon
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs">{item.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        </div>
       </div>
     </div>
   );

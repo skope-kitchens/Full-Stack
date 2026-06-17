@@ -7,6 +7,7 @@ import {
   transferBrandStock,
   deleteBrandStockItem,
   markBrandStockUsed,
+  archiveBrandStockItem,
   reconcileStock,
 } from "../controllers/brandStock.controller.js";
 
@@ -32,8 +33,17 @@ router.delete(
 router.patch(
   "/brand-stock/:id/used",
   authMiddleware,
-  requireRole("INGREDIENT_MANAGER"),
+  requireRole("RECIPE_MANAGER", "INGREDIENT_MANAGER"),
   markBrandStockUsed
+);
+
+// ARCHIVE — soft delete. RECIPE_MANAGER is scoped to their own branch's kitchen
+// stock and may only archive items with qtyRemaining === 0 (enforced in controller).
+router.patch(
+  "/brand-stock/:id/archive",
+  authMiddleware,
+  requireRole("RECIPE_MANAGER", "INGREDIENT_MANAGER"),
+  archiveBrandStockItem
 );
 
 // RECONCILE — both roles (qty correction, not destructive; RECIPE_MANAGER needs this in RecipeInventoryModal)

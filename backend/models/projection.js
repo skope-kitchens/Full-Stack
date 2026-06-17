@@ -18,6 +18,8 @@ const projectionSchema = new mongoose.Schema(
       index: true,
     },
     brandName: { type: String, required: true, trim: true, index: true },
+    branchCode: { type: String, required: true, trim: true, index: true },
+    submittedAt: { type: Date, default: Date.now },
     type: {
       type: String,
       enum: ["DAILY", "WEEKLY"],

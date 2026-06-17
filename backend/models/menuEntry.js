@@ -14,6 +14,7 @@ const menuEntrySchema = new mongoose.Schema(
   {
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     brandName: { type: String, default: "", trim: true, index: true },
+    branchCode: { type: String, required: true, trim: true, index: true },
     items: { type: [menuItemSchema], default: [] },
     isSeenByRecipeAdmin: { type: Boolean, default: false, index: true },
   },

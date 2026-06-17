@@ -6,6 +6,15 @@ export const listBrandStock = async (req, res) => {
     const { brandName } = req.query || {};
     const q = {};
     if (brandName) q.brandName = String(brandName).trim();
+
+    // RECIPE_MANAGER's Inventory screen is for branch-wise kitchen raw ingredients only —
+    // exclude the fridge (SEMI_FINISHED), which now has its own dedicated Fridge Audit page.
+    if (req.user?.role === "RECIPE_MANAGER") {
+      q.location = "BRANCH_KITCHEN";
+      if (req.user?.branchCode) q.branchCode = req.user.branchCode;
+      q.status = { $ne: "Archived" };
+    }
+
     const list = await BrandStock.find(q).sort({ itemName: 1 }).lean();
     const normalized = (list || []).map((d) => ({
       ...d,
@@ -110,7 +119,12 @@ export const transferBrandStock = async (req, res) => {
 
     // Destination credit — atomic with source debit inside the same transaction.
     // If this throws, the transaction aborts and the source debit is rolled back.
-    const destFilter = { brandName: to, itemName: item };
+    const destFilter = {
+      brandName: to,
+      itemName: item,
+      location: fromDoc.location || "BRANCH_KITCHEN",
+      branchCode: String(fromDoc.branchCode || "JPNAGAR").trim().toUpperCase(),
+    };
     if (ingBrand) destFilter.ingredientBrand = ingBrand;
 
     const toDoc = await BrandStock.findOneAndUpdate(
@@ -120,8 +134,6 @@ export const transferBrandStock = async (req, res) => {
           uom: unit || fromDoc.uom,
           status: "Pending",
           ownedBy: to,
-          location: fromDoc.location || "BRANCH_KITCHEN",
-          branchCode: fromDoc.branchCode || "JP_NAGAR",
         },
         $inc: { qtyRemaining: quantity },
         $push: {
@@ -193,11 +205,19 @@ export const markBrandStockUsed = async (req, res) => {
   try {
     const { id } = req.params;
     const actorRole = req.user?.role || "";
+    const isRecipeManager = actorRole === "RECIPE_MANAGER";
 
     // Read current state before mutating — needed for previousQty in history entry
     // and for the state guard (only Pending items can be marked Used).
     const current = await BrandStock.findById(id).lean();
     if (!current) return res.status(404).json({ message: "Stock item not found" });
+
+    // RECIPE_MANAGER may only act on their own branch's kitchen raw stock.
+    if (isRecipeManager) {
+      if (current.location !== "BRANCH_KITCHEN" || current.branchCode !== req.user?.branchCode) {
+        return res.status(403).json({ message: "You can only manage your branch's kitchen stock" });
+      }
+    }
 
     if (current.status !== "Pending") {
       return res.status(409).json({
@@ -211,20 +231,84 @@ export const markBrandStockUsed = async (req, res) => {
       console.warn(`[BrandStock] markBrandStockUsed: item ${id} has qtyRemaining=${current.qtyRemaining}. Marking Used with non-zero quantity.`);
     }
 
+    const previousQty = Number(current.qtyRemaining || 0);
+
+    // RECIPE_MANAGER's "Mark Used" means the kitchen consumed the rest of this item —
+    // zero it out and record the consumption as a TRANSFER_OUT. INGREDIENT_MANAGER's
+    // existing MARK_USED behavior (qty untouched) is preserved for all other locations.
+    const update = isRecipeManager
+      ? {
+          $set: { status: "Used", qtyRemaining: 0 },
+          $push: {
+            history: {
+              type: "TRANSFER_OUT",
+              qty: previousQty,
+              uom: current.uom || "",
+              previousQty,
+              newQty: 0,
+              at: new Date(),
+              actorRole,
+              note: "Marked as used by chef",
+            },
+          },
+        }
+      : {
+          $set: { status: "Used" },
+          $push: {
+            history: {
+              type: "MARK_USED",
+              qty: previousQty,
+              uom: current.uom || "",
+              previousQty,
+              newQty: previousQty,
+              at: new Date(),
+              actorRole,
+              note: "Item marked as Used",
+            },
+          },
+        };
+
+    const updated = await BrandStock.findByIdAndUpdate(id, update, { new: true }).lean();
+
+    if (!updated) return res.status(404).json({ message: "Stock item not found" });
+    return res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error("Mark brand stock used error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to mark used" });
+  }
+};
+
+export const archiveBrandStockItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const actorRole = req.user?.role || "";
+    const isRecipeManager = actorRole === "RECIPE_MANAGER";
+
+    const current = await BrandStock.findById(id).lean();
+    if (!current) return res.status(404).json({ message: "Stock item not found" });
+
+    if (isRecipeManager) {
+      if (current.location !== "BRANCH_KITCHEN" || current.branchCode !== req.user?.branchCode) {
+        return res.status(403).json({ message: "You can only manage your branch's kitchen stock" });
+      }
+      if (Number(current.qtyRemaining || 0) !== 0) {
+        return res.status(400).json({ message: "Cannot archive item with remaining stock. Reconcile to 0 first." });
+      }
+    }
+
     const updated = await BrandStock.findByIdAndUpdate(
       id,
       {
-        $set: { status: "Used" },
+        $set: { status: "Archived" },
         $push: {
           history: {
-            type: "MARK_USED",
+            type: "MARK_ARCHIVED",
             qty: Number(current.qtyRemaining || 0),
             uom: current.uom || "",
             previousQty: Number(current.qtyRemaining || 0),
-            newQty: Number(current.qtyRemaining || 0),
             at: new Date(),
             actorRole,
-            note: "Item marked as Used",
+            note: "Item archived",
           },
         },
       },
@@ -234,8 +318,8 @@ export const markBrandStockUsed = async (req, res) => {
     if (!updated) return res.status(404).json({ message: "Stock item not found" });
     return res.json({ success: true, data: updated });
   } catch (err) {
-    console.error("Mark brand stock used error:", err?.message || err);
-    return res.status(500).json({ message: "Failed to mark used" });
+    console.error("Archive brand stock error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to archive stock item" });
   }
 };
 
@@ -252,6 +336,13 @@ export const reconcileStock = async (req, res) => {
 
     const current = await BrandStock.findById(id).lean();
     if (!current) return res.status(404).json({ message: "Stock item not found" });
+
+    // RECIPE_MANAGER may only reconcile their own branch's kitchen raw stock.
+    if (actorRole === "RECIPE_MANAGER") {
+      if (current.location !== "BRANCH_KITCHEN" || current.branchCode !== req.user?.branchCode) {
+        return res.status(403).json({ message: "You can only manage your branch's kitchen stock" });
+      }
+    }
 
     const previousQty = Number(current.qtyRemaining || 0);
 

@@ -27,6 +27,9 @@ export const authMiddleware = async (req, res, next) => {
         _id: decoded.adminId || null,
         role: decoded.role,
         admin: true,
+        branchCode: decoded.branchCode || null,
+        warehouseId: decoded.warehouseId || null,
+        branchCodes: decoded.branchCodes || [],
       };
       return next();
     }

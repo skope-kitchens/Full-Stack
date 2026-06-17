@@ -11,6 +11,11 @@ export const listRistaStores = async (req, res) => {
       storeName: s.storeName || s.name || "",
     })).filter((s) => s.storeCode);
 
+    // Internal-only test branch — not a real Rista outlet. Lets the "Test Brand"
+    // chef account (branchCode: TESTBRANCH) be exercised end-to-end without
+    // touching real branch/store data.
+    result.push({ storeCode: "TESTBRANCH", storeName: "Test Branch (Internal)" });
+
     return res.json({ stores: result });
   } catch (err) {
     console.error("Rista stores fetch failed", err?.response?.data || err);

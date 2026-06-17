@@ -329,3 +329,51 @@ The constraint that history is append-only means mistakes in history entries can
 ### Migration Implications
 
 The embedded history model is already in production. The append-only constraint is a code-level discipline commitment rather than a schema enforcement (MongoDB does not natively prevent `$pull` on an array). The enforcement mechanism is code review: no operation on brand_stocks should include `$pull` or element-level `$set` on the history field. If document growth becomes a concern in the future, the correct response is to archive old documents (ADR-09 soft archive) rather than pruning their history.
+
+---
+
+## ADR-11: Admin users are branch/warehouse-scoped database records, not global env-var roles
+
+### Context
+
+Admin logins (RECIPE_MANAGER, INGREDIENT_MANAGER, WALLET_MANAGER) originally existed only as hardcoded credentials in environment variables, checked with plain-text comparison. There was exactly one admin per role, globally. This matched early development but not operational reality: Skope Kitchens runs multiple kitchen branches (JP Nagar, Marathahalli, Kalyan Nagar), each with its own chef, and warehouses that supply multiple kitchens.
+
+A single global Recipe Manager cannot represent "the chef at Marathahalli should only see Marathahalli's projections, kitchen inventory, and fridge stock — not JP Nagar's." Similarly, a single global Ingredient Manager cannot represent "this person manages the JP Nagar warehouse, which supplies three kitchens." The env-var model also had no `_id`, so any controller referencing `req.user._id` for an admin silently got `undefined`.
+
+A separate prior change had already introduced an `AdminUser` Mongoose model and an idempotent seed script (`scripts/seedAdminUsers.js`) to migrate admin credentials into MongoDB with bcrypt-hashed passwords, giving each admin a real `_id`. That model had no concept of location scoping.
+
+### Decision
+
+`AdminUser` records carry location-scoping fields:
+
+- `branchCode` — for RECIPE_MANAGER. The single kitchen branch this admin operates (e.g. `"TESTBRANCH"`, eventually `"JPNAGAR"`, `"MARATHAHALLI"`, `"KALYANNAGAR"`). Operational data (projections, kitchen inventory, fridge stock) is scoped to this branch. **Recipes themselves (main_recipes, sub_recipes) remain global** — a Recipe Manager can create/edit/view any recipe regardless of branch, since recipes are shared blueprints, not branch-local data.
+- `warehouseId` — for INGREDIENT_MANAGER (and optionally set on a Recipe Manager to record which warehouse supplies their kitchen). The single warehouse this admin manages.
+- `branchCodes` (array) — for INGREDIENT_MANAGER. The list of kitchen branches that warehouse supplies, since one warehouse can serve multiple kitchens (currently the JP Nagar warehouse serves all three branches).
+
+There is no uniqueness constraint on `role` — multiple `AdminUser` documents can share a role (one per branch/warehouse), differentiated by `email`.
+
+The login flow (`auth.controller.js`) embeds `branchCode`, `warehouseId`, and `branchCodes` into the JWT alongside `adminId` and `role`. `authMiddleware` (`middleware/auth.js`) decodes these onto `req.user` for every admin request. This also resolves the `req.user._id` gap for admins, since `adminId` now comes from a real database `_id`.
+
+The seed script reads numbered env-var blocks — `ADMIN_RECIPE_<n>_USERNAME/PASSWORD/BRANCH_CODE/WAREHOUSE_ID` and `ADMIN_INGREDIENT_<n>_USERNAME/PASSWORD/WAREHOUSE_ID/BRANCH_CODES` — looping from `n=1` until a number is missing. Adding a new kitchen's chef or a new warehouse's ingredient manager requires only adding a new numbered block to `.env` and re-running the idempotent seed script; no code changes.
+
+### Consequences
+
+Every admin request now carries enough information (`req.user.branchCode`, `req.user.warehouseId`, `req.user.branchCodes`) for downstream route handlers to filter operational queries by location. **This filtering has not yet been applied to any existing routes** — projections, kitchen inventory, fridge stock, and indent routes still return unscoped (global) data. Wiring that filtering in is a separate, deliberate follow-up so it can be done route-by-route without breaking working features.
+
+Wallet Manager scoping is explicitly deferred — `WALLET_MANAGER` records have no `branchCode`/`warehouseId` and remain global, to be addressed during the payments phase.
+
+The env-var fallback admin login path is still in place for rollback safety; it was not removed by this change.
+
+### Alternatives Rejected
+
+**Encode branch in the role string itself (e.g. `RECIPE_MANAGER_JPNAGAR`).** Rejected because it would require updating `requireRole`/`requireAdmin` and every route's allowed-roles list every time a branch is added, and would make role-based authorization checks (`role === "RECIPE_MANAGER"`) brittle across the codebase.
+
+**Single `location` field shared by both roles.** Rejected because the relationship is asymmetric: a Recipe Manager belongs to exactly one branch, while an Ingredient Manager's warehouse can serve many branches. Collapsing these into one field would force either a list-vs-scalar type ambiguity or lossy modeling of the warehouse-to-branches fan-out.
+
+**JSON array in a single env var for admin seed config.** Considered for the seed script instead of numbered env-var blocks. Rejected because the founder is a non-technical operator editing `.env` directly — a malformed JSON array (missing comma, bracket) would silently break seeding for all admins, whereas numbered flat key blocks fail independently and are copy-paste friendly.
+
+### Migration Implications
+
+Existing `AdminUser` documents created before this change have `branchCode: null`, `warehouseId: null`, `branchCodes: []` by schema default — they are treated as global/unscoped until re-seeded with location data. Re-running the seed script with populated numbered env blocks updates them in place (upsert by email), no data loss.
+
+The next phase — scoping projections, kitchen inventory, fridge stock, and indent routes to `req.user.branchCode`/`req.user.warehouseId`/`req.user.branchCodes` — must be done per-route with care, since `AdminDashboard` and related controllers are already high-connectivity nodes in the codebase graph (see Key Architecture Facts in CLAUDE.md).

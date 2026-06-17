@@ -2,6 +2,9 @@ const AUTH_TOKEN_KEY = 'skope_auth_token'
 const AUTH_ROLE_KEY = 'skope_auth_role'
 const AUTH_USERTYPE_KEY = 'skope_auth_usertype'
 const USER_KEY = 'skope_user'
+const AUTH_BRANCH_CODE_KEY = 'skope_auth_branch_code'
+const AUTH_WAREHOUSE_ID_KEY = 'skope_auth_warehouse_id'
+const AUTH_BRANCH_CODES_KEY = 'skope_auth_branch_codes'
 
 /**
  * Decode the payload of a JWT without verifying the signature.
@@ -31,6 +34,21 @@ export const authUtils = {
       if (decoded?.role) {
         sessionStorage.setItem(AUTH_ROLE_KEY, decoded.role)
       }
+      if (decoded?.branchCode) {
+        sessionStorage.setItem(AUTH_BRANCH_CODE_KEY, decoded.branchCode)
+      } else {
+        sessionStorage.removeItem(AUTH_BRANCH_CODE_KEY)
+      }
+      if (decoded?.warehouseId) {
+        sessionStorage.setItem(AUTH_WAREHOUSE_ID_KEY, decoded.warehouseId)
+      } else {
+        sessionStorage.removeItem(AUTH_WAREHOUSE_ID_KEY)
+      }
+      if (Array.isArray(decoded?.branchCodes) && decoded.branchCodes.length) {
+        sessionStorage.setItem(AUTH_BRANCH_CODES_KEY, JSON.stringify(decoded.branchCodes))
+      } else {
+        sessionStorage.removeItem(AUTH_BRANCH_CODES_KEY)
+      }
       if (userType) {
         sessionStorage.setItem(AUTH_USERTYPE_KEY, userType)
       }
@@ -58,6 +76,31 @@ export const authUtils = {
       return sessionStorage.getItem(AUTH_ROLE_KEY) || null
     } catch {
       return null
+    }
+  },
+
+  getBranchCode: () => {
+    try {
+      return sessionStorage.getItem(AUTH_BRANCH_CODE_KEY) || null
+    } catch {
+      return null
+    }
+  },
+
+  getWarehouseId: () => {
+    try {
+      return sessionStorage.getItem(AUTH_WAREHOUSE_ID_KEY) || null
+    } catch {
+      return null
+    }
+  },
+
+  getBranchCodes: () => {
+    try {
+      const raw = sessionStorage.getItem(AUTH_BRANCH_CODES_KEY)
+      return raw ? JSON.parse(raw) : []
+    } catch {
+      return []
     }
   },
 
@@ -92,6 +135,9 @@ export const authUtils = {
       sessionStorage.removeItem(AUTH_ROLE_KEY)
       sessionStorage.removeItem(AUTH_USERTYPE_KEY)
       sessionStorage.removeItem(USER_KEY)
+      sessionStorage.removeItem(AUTH_BRANCH_CODE_KEY)
+      sessionStorage.removeItem(AUTH_WAREHOUSE_ID_KEY)
+      sessionStorage.removeItem(AUTH_BRANCH_CODES_KEY)
     } catch (error) {
       console.error('Error clearing authentication:', error)
     }

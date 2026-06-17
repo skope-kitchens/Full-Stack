@@ -13,6 +13,13 @@ const BRANCH_LABELS = {
   KOR: "Koramangala",
   HO: "Head Office",
 };
+
+const MENU_BRANCH_OPTIONS = [
+  { label: "JP Nagar", value: "JPNAGAR" },
+  { label: "Marathahalli", value: "MARATHAHALLI" },
+  { label: "Kalyan Nagar", value: "KALYANNAGAR" },
+  { label: "Test Branch", value: "TESTBRANCH" },
+];
 const formatMoney = (value) =>
   Number(value || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
@@ -63,6 +70,7 @@ export default function Dashboard() {
   const [menuRows, setMenuRows] = useState([
     { recipeName: "", qty: 1, uom: "PC", cost: 0 },
   ]);
+  const [menuBranchCode, setMenuBranchCode] = useState("");
   const [menuSaving, setMenuSaving] = useState(false);
   const [showClientMenu, setShowClientMenu] = useState(false);
 
@@ -1125,6 +1133,24 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-6">
+              <div className="mb-4 max-w-xs">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Kitchen Branch
+                </label>
+                <select
+                  required
+                  value={menuBranchCode}
+                  onChange={(e) => setMenuBranchCode(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                >
+                  <option value="">Select branch…</option>
+                  {MENU_BRANCH_OPTIONS.map((b) => (
+                    <option key={b.value} value={b.value}>
+                      {b.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="border rounded-lg overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100">
@@ -1248,11 +1274,16 @@ export default function Dashboard() {
                     }))
                     .filter((row) => row.recipeName && row.qty > 0 && row.uom);
                   if (items.length === 0) return;
+                  if (!menuBranchCode) {
+                    toast.error("Please select a kitchen branch");
+                    return;
+                  }
                   try {
                     setMenuSaving(true);
-                    await api.post("/api/menu-entries", { items });
+                    await api.post("/api/menu-entries", { items, branchCode: menuBranchCode });
                     setShowEnterMenu(false);
                     setMenuRows([{ recipeName: "", qty: 1, uom: "GM", cost: 0 }]);
+                    setMenuBranchCode("");
                     toast.success("Menu submitted successfully");
                   } catch (err) {
                     toast.error(err.response?.data?.message || "Failed to save menu");

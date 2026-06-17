@@ -8,12 +8,36 @@ const today = () => new Date().toISOString().split("T")[0];
 
 const emptyRow = () => ({ recipeName: "", targetQty: "", uom: "PC" });
 
+const BRANCH_OPTIONS = [
+  { label: "JP Nagar", value: "JPNAGAR" },
+  { label: "Marathahalli", value: "MARATHAHALLI" },
+  { label: "Kalyan Nagar", value: "KALYANNAGAR" },
+  { label: "Test Branch", value: "TESTBRANCH" },
+];
+
+const formatSubmittedAt = (value) => {
+  if (!value) return "";
+  const d = new Date(value);
+  const datePart = d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  const timePart = d.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return `${datePart}, ${timePart}`;
+};
+
 export default function ProjectionForm() {
   const navigate = useNavigate();
 
   const [dishes, setDishes] = useState([]);
   const [type, setType] = useState("DAILY");
   const [forDate, setForDate] = useState(today());
+  const [branchCode, setBranchCode] = useState("");
   const [rows, setRows] = useState([emptyRow()]);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(null); // holds the created projection on success
@@ -53,9 +77,14 @@ export default function ProjectionForm() {
       return;
     }
 
+    if (!branchCode) {
+      toast.error("Please select a kitchen branch");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const res = await api.post("/api/projections", { type, forDate, items });
+      const res = await api.post("/api/projections", { type, forDate, items, branchCode });
       setSubmitted(res.data?.data);
       toast.success("Projection submitted successfully");
     } catch (err) {
@@ -87,6 +116,12 @@ export default function ProjectionForm() {
                 </strong>{" "}
                 has been received. The kitchen team will review it shortly.
               </p>
+
+              {submitted.submittedAt && (
+                <p className="text-xs text-gray-400">
+                  Submitted on {formatSubmittedAt(submitted.submittedAt)}
+                </p>
+              )}
 
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 text-left">
                 <strong>Note:</strong> No wallet amount has been deducted.
@@ -169,8 +204,8 @@ export default function ProjectionForm() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
 
-            {/* Type + Date row */}
-            <div className="bg-white rounded-xl shadow-sm border p-5 grid grid-cols-2 gap-4">
+            {/* Type + Date + Branch row */}
+            <div className="bg-white rounded-xl shadow-sm border p-5 grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Projection Type
@@ -196,6 +231,25 @@ export default function ProjectionForm() {
                   onChange={(e) => setForDate(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Kitchen Branch
+                </label>
+                <select
+                  required
+                  value={branchCode}
+                  onChange={(e) => setBranchCode(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                >
+                  <option value="">Select branch…</option>
+                  {BRANCH_OPTIONS.map((b) => (
+                    <option key={b.value} value={b.value}>
+                      {b.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

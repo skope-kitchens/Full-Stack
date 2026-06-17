@@ -36,6 +36,17 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
+/**
+ * Each entry creates (or updates) one admin login.
+ *
+ * Recipe Managers and Ingredient Managers are read from numbered env var
+ * blocks (ADMIN_RECIPE_1_*, ADMIN_RECIPE_2_*, ADMIN_INGREDIENT_1_*, ...).
+ * To add a new kitchen's Recipe Manager or a new warehouse's Ingredient
+ * Manager, copy the relevant block in .env, increment the number, fill in
+ * that admin's email/password/branchCode (or warehouseId), and re-run this
+ * script. Numbering must be contiguous starting at 1 — the loop stops at
+ * the first missing number.
+ */
 const adminsToSeed = [
   {
     email: process.env.ADMIN_WALLET_USERNAME,
@@ -43,19 +54,35 @@ const adminsToSeed = [
     role: "WALLET_MANAGER",
     name: "Wallet Manager",
   },
-  {
-    email: process.env.ADMIN_RECIPE_USERNAME,
-    password: process.env.ADMIN_RECIPE_PASSWORD,
-    role: "RECIPE_MANAGER",
-    name: "Recipe Manager",
-  },
-  {
-    email: process.env.ADMIN_INGREDIENT_USERNAME,
-    password: process.env.ADMIN_INGREDIENT_PASSWORD,
-    role: "INGREDIENT_MANAGER",
-    name: "Ingredient Manager",
-  },
 ];
+
+for (let i = 1; process.env[`ADMIN_RECIPE_${i}_USERNAME`]; i++) {
+  adminsToSeed.push({
+    email: process.env[`ADMIN_RECIPE_${i}_USERNAME`],
+    password: process.env[`ADMIN_RECIPE_${i}_PASSWORD`],
+    role: "RECIPE_MANAGER",
+    name: `Recipe Manager ${i}`,
+    branchCode: process.env[`ADMIN_RECIPE_${i}_BRANCH_CODE`] || null,
+    // The warehouse that supplies this kitchen (for indents/dispatches).
+    warehouseId: process.env[`ADMIN_RECIPE_${i}_WAREHOUSE_ID`] || null,
+  });
+}
+
+for (let i = 1; process.env[`ADMIN_INGREDIENT_${i}_USERNAME`]; i++) {
+  const branchCodesRaw = process.env[`ADMIN_INGREDIENT_${i}_BRANCH_CODES`] || "";
+  adminsToSeed.push({
+    email: process.env[`ADMIN_INGREDIENT_${i}_USERNAME`],
+    password: process.env[`ADMIN_INGREDIENT_${i}_PASSWORD`],
+    role: "INGREDIENT_MANAGER",
+    name: `Ingredient Manager ${i}`,
+    warehouseId: process.env[`ADMIN_INGREDIENT_${i}_WAREHOUSE_ID`] || null,
+    // The kitchens this warehouse supplies, comma-separated (e.g. "JPNAGAR,MARATHAHALLI,KALYANNAGAR").
+    branchCodes: branchCodesRaw
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean),
+  });
+}
 
 async function seed() {
   await mongoose.connect(MONGO_URI, { family: 4 });
@@ -78,11 +105,19 @@ async function seed() {
         role: admin.role,
         name: admin.name,
         isActive: true,
+        branchCode: admin.branchCode || null,
+        warehouseId: admin.warehouseId || null,
+        branchCodes: admin.branchCodes || [],
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    console.log(`[Seed] ✓ ${admin.role} → ${normalizedEmail} (id: ${result._id})`);
+    const scopeParts = [];
+    if (admin.branchCode) scopeParts.push(`branch=${admin.branchCode}`);
+    if (admin.warehouseId) scopeParts.push(`warehouse=${admin.warehouseId}`);
+    if (admin.branchCodes?.length) scopeParts.push(`supplies=[${admin.branchCodes.join(",")}]`);
+    const scope = scopeParts.length ? scopeParts.join(", ") : "global";
+    console.log(`[Seed] ✓ ${admin.role} → ${normalizedEmail} (id: ${result._id}, ${scope})`);
   }
 
   console.log("\n[Seed] Complete.");
