@@ -57,7 +57,9 @@ const productionOrderSchema = new mongoose.Schema(
       enum: [
         "PENDING_INDENT_APPROVAL",
         "AWAITING_BRAND_PAYMENT",
+        "AWAITING_WAREHOUSE_TRANSFER",
         "READY_FOR_DISPATCH",
+        "READY_TO_COOK",
         "IN_PREPARATION",
         "COMPLETED",
       ],

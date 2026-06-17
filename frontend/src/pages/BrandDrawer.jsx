@@ -469,7 +469,7 @@ const BrandDrawer = ({ brand, adminRole, onClose }) => {
               onClick={handleViewPurchaseRegister}
               className="w-full border border-gray-300 text-gray-800 py-3 rounded-xl font-semibold text-sm hover:bg-gray-50 transition"
             >
-              Purchase Register Stock
+              View Stock
             </button>
           </div>
         )}

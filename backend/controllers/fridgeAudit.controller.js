@@ -33,9 +33,19 @@ export const getFridgeStock = async (req, res) => {
       .lean();
 
     const data = (list || []).map((doc) => {
-      // Every RECEIVED entry is one batch added to the fridge — most recent first.
+      // Find the most recent audit action (RECONCILIATION/SPOILAGE) — any batch
+      // received before that point has already been counted in a past audit and
+      // should no longer show up as "Added On" here.
+      const lastAuditAt = (doc.history || [])
+        .filter((h) => h.type === "RECONCILIATION" || h.type === "SPOILAGE")
+        .reduce((latest, h) => {
+          const at = new Date(h.at).getTime();
+          return at > latest ? at : latest;
+        }, 0);
+
+      // Every RECEIVED entry added since the last audit — most recent first.
       const receivedBatches = (doc.history || [])
-        .filter((h) => h.type === "RECEIVED")
+        .filter((h) => h.type === "RECEIVED" && new Date(h.at).getTime() > lastAuditAt)
         .sort((a, b) => new Date(b.at) - new Date(a.at))
         .map((h) => ({ qty: h.qty, uom: h.uom, at: h.at }));
 

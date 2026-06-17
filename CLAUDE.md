@@ -308,6 +308,81 @@ The founder's only goal is a fully working project. Every decision you make shou
 
 This depends entirely on the Purchase Register collection, FEFO deduction logic, and unit-conversion helper already built above. Explicitly deferred by the founder to a future session — do not build until requested.
 
+---
+
+## 14. Feature Log — Net Requirements Check (Branch-Scoped Stock Cascade)
+
+**What it is:** When a RECIPE_MANAGER opens a projection for review (`GET /api/projections/:id/net-requirements`), the system explodes the recipe BOM (via the existing `bomExpander.js` / `extractIngredientsFromBOM()` — untouched) and, for every raw ingredient needed, runs a 3-level stock cascade to figure out exactly what's missing before the projection can be converted into a Production Order.
+
+**The cascade (per raw ingredient, each level floors at 0):**
+```
+Required qty (from BOM)
+  minus SEMI_FINISHED fridge stock   → brand_stocks: { brandName, itemName, location: "SEMI_FINISHED", branchCode: projection.branchCode }
+  minus BRANCH_KITCHEN raw stock     → brand_stocks: { brandName, itemName, location: "BRANCH_KITCHEN", branchCode: projection.branchCode }
+  minus WAREHOUSE stock              → brand_stocks: { brandName, itemName, location: in [WAREHOUSE_DRY/CHILLER/FREEZER], branchCode: req.user.warehouseId }
+  = shortfall (needs vendor indent)
+```
+
+- `req.user.warehouseId` is the Recipe Manager's linked warehouse — already present on their JWT (seeded from `ADMIN_RECIPE_i_WAREHOUSE_ID` in `.env`), no extra DB lookup needed.
+- Applies to **both** `directIngredients` (raw ingredients directly on the main recipe) and `warehouseIngredients` (raw leaves under each sub-recipe's batches).
+- The separate sub-recipe-level fridge check (is the prepared dish itself already sitting in SEMI_FINISHED/BRANCH_KITCHEN) is unchanged — that's a different concept (finished dish vs. raw ingredient).
+- Each ingredient's response now includes `semiFinishedQty`, `branchKitchenQty`, `warehouseQty`, `warehouseUom`, `shortfall`, and `sufficient` (= `shortfall <= 0`), replacing the old single `"SKOPE_WAREHOUSE"`-brandName-only lookup.
+
+**Files involved:**
+- `backend/controllers/projection.controller.js` — new `applyStockCascade()` helper + updated `getNetRequirements` (`directIngredients` and `warehouseIngredients` sections)
+
+**Shortfall-only indents (built):** When the Recipe Manager confirms a projection (`POST /api/projections/:id/convert`), `subRecipesToPrepare` and `warehouseIngredientsToDispatch` are built from the cascade results — a sub-recipe is only queued for fresh batches if `batchesNeeded > 0`, and an ingredient is only added to the dispatch/indent list if `shortfall > 0`. So if Branch Kitchen + Fridge + Warehouse already cover an ingredient, no indent line is raised for it at all.
+
+**Fully-covered short-circuit (built):** If, after the above filtering, `subRecipesToPrepare` and `warehouseIngredientsToDispatch` are both empty — meaning the fridge and branch kitchen already have everything needed, nothing to batch-produce and nothing to procure — `convertProjectionToProductionOrder` skips creating a `ProductionOrder` entirely. It sets `projection.status = "COMPLETED"` directly and returns `{ success: true, fullyCovered: true, message: "Fully covered by existing stock — no production or procurement needed." }`. No payment/dispatch/preparation workflow is triggered. The frontend (`ProjectionReview.jsx`) shows a green "Fully covered by existing stock" banner instead of the production-order tracker and payment UI.
+
+**Branch Kitchen stock deduction on batch completion (built):** When a sub-recipe batch is marked complete (`PATCH /api/production-orders/:id/complete`), in addition to crediting the finished dish to SEMI_FINISHED (fridge), the system now also debits the raw ingredients consumed from that sub-recipe's BOM out of BRANCH_KITCHEN stock (via `extractIngredientsFromBOM` + `aggregateIngredients`, scoped strictly to that sub-recipe's items — other ingredients are untouched). Deductions are clamped to available stock (never goes negative) and recorded as `TRANSFER_OUT` history entries. The response includes `ingredientsDeducted`/`ingredientsSkipped`, surfaced to the chef as toasts.
+
+**No-payment shortcut + warehouse transfer indents (built):** The stock cascade now also returns `warehouseTransferQty` per ingredient — the portion of the Branch-Kitchen shortfall that the central Warehouse already covers (already paid for, just needs relocating). On `/convert`:
+- These are raised as `ingredient_indents` documents with a new field `indentType: "WAREHOUSE_TRANSFER"` (default for all existing/normal indents is `"PROCUREMENT"` — non-breaking) and `sourceBranchCode` = the Recipe Manager's warehouse. Cost is always 0, no client payment.
+- When the Ingredient Admin issues a `WAREHOUSE_TRANSFER` indent (`PATCH /api/ingredient-indent/:id/issue`), `issueIndentItem` now atomically **debits** the Warehouse `brand_stocks` record and **credits** Branch Kitchen by the same qty (mongoose transaction) — instead of the normal procurement path which only credits Branch Kitchen (assumes new vendor stock via Purchase Register). Purchase Register deduction is skipped for transfer indents.
+- If, after this, `warehouseIngredientsToDispatch` is empty (nothing needs *new* vendor procurement — only fridge/branch-kitchen/warehouse-transfer covers everything), the created `ProductionOrder` skips `AWAITING_BRAND_PAYMENT`/`READY_FOR_DISPATCH` entirely and is created directly at `IN_PREPARATION` with `financials.paymentStatus: "PAID"` and cost 0 — no invoice is sent to the client. The response includes `skipPayment` and `warehouseTransfersRaised` flags, surfaced to the chef as toasts in `ProjectionReview.jsx`.
+- The Ingredient Admin's indent table (`AdminDashboard.jsx`) labels `WAREHOUSE_TRANSFER` rows with a purple "Warehouse Transfer (from X)" badge, hides the cost column for them, and shows a one-click "Verify Transfer" button (auto cost 0) instead of the cost-entry input.
+
+**Files involved:**
+- `backend/models/ingredientIndent.js` — new `indentType` (enum `PROCUREMENT`/`WAREHOUSE_TRANSFER`, default `PROCUREMENT`) and `sourceBranchCode` fields
+- `backend/controllers/projection.controller.js` — `applyStockCascade` returns `warehouseTransferQty`; `convertProjectionToProductionOrder` raises transfer indents and applies the no-payment shortcut
+- `backend/controllers/ingredientIndent.controller.js` — `issueIndentItem` branches on `indentType` for the atomic warehouse→branch-kitchen transfer
+- `frontend/src/pages/admin/ProjectionReview.jsx`, `frontend/src/pages/AdminDashboard.jsx`
+
+
+## 15. Feature Log — Warehouse Stock Gate, Single-Source "Inventory Stock", and Indent Cleanup (built)
+
+**"Warehouse Stock" now means ONE thing everywhere: the brand's Purchase Register.**
+Earlier there was a confusing split between "real warehouse" (`brand_stocks`) and "Purchase Register" stock. This was scrapped — per founder direction there is only ONE inventory stock, the Purchase Register (everything physically enters the system through it). All cascade/UI fields are now named `brandStockWarehouseQty` / "Warehouse Stock" — never "Purchase Register" in UI labels, so it reads naturally to the chef/admin.
+
+- `applyStockCascade()` in `projection.controller.js`: 3-level cascade is SEMI_FINISHED (fridge) → BRANCH_KITCHEN → Warehouse Stock (Purchase Register), with `convertQty()` handling UOM conversion. Returns `semiFinishedQty`, `branchKitchenQty`, `warehouseQty`, `warehouseUom`, `brandStockWarehouseQty`, `warehouseTransferQty`, `shortfall`.
+- `indentType` enum on `ingredient_indents` (`backend/models/ingredientIndent.js`): `PROCUREMENT` (default, client pays), `WAREHOUSE_TRANSFER` (LEGACY — kept in schema/issue code for old records only, no longer generated), `INVENTORY_TRANSFER` (current type for "Branch Kitchen short, Warehouse Stock covers it" — cost always 0, credits Branch Kitchen + deducts Purchase Register via FEFO).
+- On `/convert`, shortfalls covered by Warehouse Stock are raised as `INVENTORY_TRANSFER` indents (purple/teal "Warehouse Stock Transfer (prepaid)" badge in Ingredient Admin's table, one-click "Verify Transfer" at cost 0).
+
+**Purchase Register FEFO deduction bug fixed (`backend/controllers/purchaseRegister.controller.js`, `deductFromPurchaseRegister`):** previously always filtered by `ingredientBrand`, which for auto-generated sub-recipe indents (always blank `ingredientBrand`) matched nothing and silently failed to deduct. Now the `ingredientBrand` filter is only applied if the indent actually specifies one — otherwise matches by `brandName` + `itemName` only. This also powers the new `getWarehouseStockAvailable()` read-only helper (same file) used everywhere below.
+
+**Stuck/orphaned indent cleanup (`AdminDashboard.jsx`):** added a "Delete" button next to "Issue" on Verified-status indent rows (calls existing `DELETE /api/ingredient-indent/:id`), so indents left behind by deleted projections can be removed.
+
+**Warehouse Stock visibility + free fulfillment for ALL indents (not just projection-based):**
+- `listIndent` now attaches `warehouseStockAvailable` (via `getWarehouseStockAvailable`) to every non-issued `PROCUREMENT` indent — how much of that item the brand already has in Warehouse Stock, converted to the indent's UOM.
+- Ingredient Admin's Inventory table shows an amber "In Warehouse Stock: X UOM" badge under the ingredient name when `warehouseStockAvailable > 0`.
+- If `warehouseStockAvailable >= qty` on a Verified row, a "Fulfill from Warehouse Stock" button appears alongside "Issue" — issuing this way deducts the Purchase Register (FEFO), credits Branch Kitchen, re-tags the indent `INVENTORY_TRANSFER`, and sets cost to ₹0 (no client charge). Normal "Issue" (client pays, procurement) still works independently.
+
+**Out-of-Stock gate — nothing can be issued/GRN'd without real Warehouse Stock backing it:**
+- `issueIndentItem` now hard-blocks issuing any `PROCUREMENT` (or untyped/default) indent if `warehouseStockAvailable < qty` — returns 409 "Out of stock... Add stock there before issuing" and reverts the indent to `INDENT_VERIFIED`. `INVENTORY_TRANSFER`/`WAREHOUSE_TRANSFER` are exempt (they move stock already accounted for).
+- Ingredient Admin's Verified row shows a red "Out of Stock" badge instead of the "Issue" button when stock is insufficient — becomes "Issue" again once Purchase Register has enough.
+- Recipe Admin's GRN modal (`GrnModal`) got a new "My Indent Requests" tab showing their own Pending/Verified `PROCUREMENT` indents, each tagged "Out of Stock" (red) or "Awaiting Issue" (yellow) based on the same `warehouseStockAvailable` check.
+
+**Deferred/future upgrade (not built):** a one-time exception so a *brand-new* ingredient that has never had any Purchase Register entry can still be issued once (bypassing the Out-of-Stock gate) — explicitly deferred by the founder.
+
+**Two latent bugs fixed in `ingredientIndent.controller.js`:**
+- `verifyIndentItem` now also rejects if `status === "INDENT_ISSUING"` (was previously only blocked for `ISSUED`, allowing a status flip mid-issue).
+- `deleteIndentItem` now also rejects if `status === "INDENT_ISSUING"` (was previously only blocked for `ISSUED`, allowing deletion of a stuck item whose stock credit may have already landed) — points the admin to "Reset Stuck Indent" instead.
+- A third minor bug (silent stock loss if `requestBrandName` were empty in `issueIndentItem`'s `else if (brandName)` branch) was reviewed and intentionally left as-is — `createIndent` always requires `clientBrandName`, so this path is not reachable in normal use.
+
+**Files involved:**
+- `backend/models/ingredientIndent.js`, `backend/controllers/ingredientIndent.controller.js`, `backend/controllers/purchaseRegister.controller.js`, `backend/controllers/projection.controller.js`
+- `frontend/src/pages/AdminDashboard.jsx` (Ingredient Admin Inventory modal + GrnModal), `frontend/src/pages/admin/ProjectionReview.jsx`
 
 ## graphify
 

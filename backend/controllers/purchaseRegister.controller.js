@@ -208,6 +208,43 @@ export const cancelPurchaseEntry = async (req, res) => {
 };
 
 /**
+ * Internal helper — used by ingredientIndent.controller.js to show the
+ * Ingredient Admin how much of a requested item already exists in the
+ * brand's Warehouse Stock (Purchase Register), converted into the indent's
+ * uom. Read-only — does not modify anything. Returns 0 on any error.
+ */
+export const getWarehouseStockAvailable = async ({ brandName, itemName, ingredientBrand, uom }) => {
+  try {
+    const cleanBrandName = String(brandName || "").trim();
+    const cleanItemName = String(itemName || "").trim();
+    const cleanIngredientBrand = String(ingredientBrand || "").trim();
+    if (!cleanBrandName || !cleanItemName) return 0;
+
+    const query = {
+      brandName: new RegExp(`^${escapeRegex(cleanBrandName)}$`, "i"),
+      itemName: new RegExp(`^${escapeRegex(cleanItemName)}$`, "i"),
+      status: "ACTIVE",
+      qtyRemaining: { $gt: 0 },
+    };
+    if (cleanIngredientBrand) {
+      query.ingredientBrand = new RegExp(`^${escapeRegex(cleanIngredientBrand)}$`, "i");
+    }
+
+    const batches = await PurchaseRegister.find(query).select("qtyRemaining uom").lean();
+
+    let total = 0;
+    for (const batch of batches) {
+      const converted = convertQty(Number(batch.qtyRemaining || 0), batch.uom, uom);
+      total += converted == null ? Number(batch.qtyRemaining || 0) : converted;
+    }
+    return Number(total.toFixed(4));
+  } catch (err) {
+    console.error("getWarehouseStockAvailable error:", err?.message || err);
+    return 0;
+  }
+};
+
+/**
  * Internal helper — called from ingredientIndent.controller.js after an
  * indent item is issued to a kitchen. Deducts the issued qty from the
  * brand's purchase register batches using FEFO (oldest expiry first),
@@ -234,13 +271,20 @@ export const deductFromPurchaseRegister = async ({
 
     if (!cleanBrandName || !cleanItemName || remainingToDeduct <= 0) return;
 
-    const batches = await PurchaseRegister.find({
+    const query = {
       brandName: new RegExp(`^${escapeRegex(cleanBrandName)}$`, "i"),
       itemName: new RegExp(`^${escapeRegex(cleanItemName)}$`, "i"),
-      ingredientBrand: new RegExp(`^${escapeRegex(cleanIngredientBrand)}$`, "i"),
       status: "ACTIVE",
       qtyRemaining: { $gt: 0 },
-    }).sort({ expiryDate: 1 });
+    };
+    // If the indent doesn't specify an ingredient brand (e.g. auto-generated
+    // sub-recipe warehouse-ingredient indents), match any ingredient brand for
+    // this item — don't require an exact (blank) match against real batches.
+    if (cleanIngredientBrand) {
+      query.ingredientBrand = new RegExp(`^${escapeRegex(cleanIngredientBrand)}$`, "i");
+    }
+
+    const batches = await PurchaseRegister.find(query).sort({ expiryDate: 1 });
 
     for (const batch of batches) {
       if (remainingToDeduct <= 0) break;

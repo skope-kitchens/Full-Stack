@@ -10,6 +10,7 @@ import {
   getProductionOrderStatus,
   completeBatchPreparation,
   getActiveProductionOrders,
+  getMyActiveProductionOrders,
   markPreparationStarted,
 } from "../controllers/productionOrder.controller.js";
 
@@ -32,6 +33,14 @@ router.get(
   authMiddleware,
   requireRole("RECIPE_MANAGER"),
   getActiveProductionOrders
+);
+
+// RECIPE_MANAGER — fetch this chef's own branch's production orders (not yet COMPLETED)
+router.get(
+  "/my-active",
+  authMiddleware,
+  requireRole("RECIPE_MANAGER"),
+  getMyActiveProductionOrders
 );
 
 // RECIPE_MANAGER — chef acknowledges receipt of ingredients and starts cooking
