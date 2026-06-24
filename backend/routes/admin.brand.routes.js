@@ -31,26 +31,9 @@ import {
   listAllIngredients,
   bulkUpdateIngredientPrices,
 } from "../controllers/admin.ingredients.controller.js";
+import { MASTER_SERVICES } from "../utils/masterServices.js";
 
 const router = express.Router();
-
-const MASTER_SERVICES = [
-  "Vendor sourcing & negotiation",
-  "In-store branding (circle banner)",
-  "Kitchen operations setup & workflow planning",
-  "Waste & yield management system",
-  "Menu engineering",
-  "SOP creation",
-  "Food tasting and trials",
-  "Recipe development",
-  "Pricing strategy and discounting",
-  "Inventory - Process and storage",
-  "Market research and competitor study",
-  "Shelf life testing & documentation",
-  "Food cost ratio - preparation",
-  "Order flow integration - KDS, POS",
-  "Branding - naming, positioning",
-];
 
 /* ================= BRANDS ================= */
 router.get(
@@ -599,6 +582,16 @@ router.post(
   requireRole("INGREDIENT_MANAGER"),
   bulkUpdateIngredientPrices
 );
+
+/* ================================================================
+ * (Removed) TEMPORARY POC WRITERS.
+ * The temp invoice + go-live endpoints that stood in before the POC dashboard
+ * existed have been migrated to the permanent, POC-gated routes:
+ *   POST  /api/poc/clients/:clientId/invoice
+ *   PATCH /api/poc/clients/:clientId/go-live
+ * No frontend referenced the old /api/admin/client/* paths (verified), so they
+ * were deleted rather than redirected. See poc.controller.js / poc.routes.js.
+ * ============================================================== */
 
 export default router;
 

@@ -57,8 +57,22 @@ const Login = () => {
         message: 'Login successful! Redirecting...'
       })
 
-      // redirect to dashboard
-      setTimeout(() => navigate('/'), 600)
+      // redirect to dashboard. Role-scoped dashboards each have a dedicated route
+      // (role is decoded from the JWT by authUtils.setAuth above) so they never
+      // transit the generic admin landing.
+      //   POC               → /poc
+      //   INGREDIENT_MANAGER → /stock-manager   (Stock Manager)
+      //   RECIPE_MANAGER     → /head-chef        (Head Chef — legacy /admin-dashboard still reachable)
+      //   LOCAL_KITCHEN      → /local-kitchen
+      const role = authUtils.getRole();
+      const ROLE_DEST = {
+        POC: "/poc",
+        INGREDIENT_MANAGER: "/stock-manager",
+        RECIPE_MANAGER: "/head-chef",
+        LOCAL_KITCHEN: "/local-kitchen",
+      };
+      const dest = ROLE_DEST[role] || "/";
+      setTimeout(() => navigate(dest), 600)
 
     } catch (error) {
       console.error("LOGIN ERROR:", error);

@@ -54,6 +54,14 @@ const adminsToSeed = [
     role: "WALLET_MANAGER",
     name: "Wallet Manager",
   },
+  // Single shared POC login. Both POCs sign in with this one account and
+  // manage every client from the one POC dashboard (no per-POC client subsets).
+  {
+    email: process.env.ADMIN_POC_USERNAME,
+    password: process.env.ADMIN_POC_PASSWORD,
+    role: "POC",
+    name: "POC",
+  },
 ];
 
 for (let i = 1; process.env[`ADMIN_RECIPE_${i}_USERNAME`]; i++) {
@@ -81,6 +89,21 @@ for (let i = 1; process.env[`ADMIN_INGREDIENT_${i}_USERNAME`]; i++) {
       .split(",")
       .map((c) => c.trim())
       .filter(Boolean),
+  });
+}
+
+// Local Kitchen operators — ONE login per kitchen (Marathahalli, Kalyan Nagar,
+// and JP Nagar's own assembly op). Each is scoped to a single branchCode, which
+// scopes every Local Kitchen view to that kitchen's data. Numbered blocks like
+// the Recipe/Ingredient managers above — add ADMIN_LOCALKITCHEN_<n>_* to .env,
+// increment contiguously from 1, and re-run this script.
+for (let i = 1; process.env[`ADMIN_LOCALKITCHEN_${i}_USERNAME`]; i++) {
+  adminsToSeed.push({
+    email: process.env[`ADMIN_LOCALKITCHEN_${i}_USERNAME`],
+    password: process.env[`ADMIN_LOCALKITCHEN_${i}_PASSWORD`],
+    role: "LOCAL_KITCHEN",
+    name: `Local Kitchen ${i}`,
+    branchCode: process.env[`ADMIN_LOCALKITCHEN_${i}_BRANCH_CODE`] || null,
   });
 }
 

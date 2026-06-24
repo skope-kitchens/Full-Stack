@@ -29,6 +29,15 @@ const financialsSchema = new mongoose.Schema(
       default: "UNPAID",
     },
     paidAt: { type: Date, default: null },
+
+    // ── Wallet → Razorpay-direct redesign (CLAUDE.md §24) ──────────────────
+    // Production invoices are now paid via Razorpay (create-order at request,
+    // verify on /pay). The OLD wallet-deduction path is fully replaced.
+    // New payments always write paidVia: "RAZORPAY" — WALLET_LEGACY is only for
+    // historical records and is NEVER written by new code.
+    razorpayOrderId: { type: String, default: null },
+    razorpayPaymentId: { type: String, default: null },
+    paidVia: { type: String, enum: ["RAZORPAY", "WALLET_LEGACY"], default: null },
   },
   { _id: false }
 );

@@ -59,21 +59,46 @@ Skope Kitchens is a cloud kitchen operations company based in Bangalore, India. 
 - Procurement support for selected brands
 - Recipe R&D and operational workflow management
 
-**Branches:**
-- JP Nagar — Head Office, main production kitchen, central warehouse (Dry Store + Chiller + Freezer). Primary operational hub.
-- Marathahalli — Secondary operational kitchen branch. No warehouse. Receives inventory from JP Nagar.
-- Kalyan Nagar — Franchise-oriented branch. Only internal brands (Al Mashawi + KKK). Future expansion context.
+**Branches (B2C base → local model):**
+- JP Nagar — Head Office + **base kitchen** + central warehouse (Dry Store + Chiller + Freezer). Vendor procurement and centralized **sub-recipe production** happen here. Trials & training also happen here. Primary operational hub.
+- Marathahalli — **local / normal kitchen**. No warehouse. Receives prepared sub-recipes from the base kitchen and does final assembly only. (Live-operations phase.)
+- Kalyan Nagar — **local / normal kitchen**, internal brands (Al Mashawi + KKK). Future expansion context. (Live-operations phase.)
+- Note: "Head Office" is just a UI label for JP Nagar — same entity, no separate backend branch, no pipeline/architecture impact.
 
 **Brand Categories:**
 - Category A (Kitchen Only) — Use kitchen infrastructure, procure own inventory. Examples: Plantoria Foods, Kritunga, Bao Bangalore, CarpeDiem, Unmenu Foods, Doughpamine Kitchen, WrapOClock, Gredo Foods, Pet Fresh Kitchen, Good Fud, Eleven Madhouse
 - Category B (Kitchen + Procurement) — Kitchen support + Skope procures inventory. Example: Malabar Flavors
 - Category C (Own Brands) — Skope fully owns and operates. Examples: Al Mashawi Shawarma, Kochi Kurry Klub (KKK)
 
+**Operating split (current direction):** A separate, Skope-internal **B2C / B2B** classification now drives the actual operating flow — see the "Operating Model" section below. B2B/B2C is the active distinction being built. The A/B/C categories above are legacy (who-procures) context and are dormant for now — do not build new logic on A/B/C.
+
 **Core Problem:** Everything runs on Excel — procurement, inventory, recipes, GRN, stock issuing, invoice workflows, FCR calculations. Causing stock mismatch, reconciliation nightmares, human dependency, scaling failures.
 
 **Goal:** Build a centralized ERP replacing the Excel chaos.
 
 ---
+
+### Operating Model — B2C (Current Build) vs B2B (Planned) — READ THIS FIRST
+
+> **Maintenance rule:** whenever a feature is **fully built and verified**, update THIS file (the relevant section + add/extend a Feature Log entry) **and** run `nodesify-graphify update .`. The doc and the knowledge graph must always reflect what is actually in the codebase — do not let them drift.
+
+Every client brand is internally classified as **B2C** or **B2B**. This flag is **Skope-internal** — it is NEVER shown to the client and is NOT collected at signup. It lives as a field on the client/brand record, set and edited **only by a POC** (default: **B2C**). It does not replace the legacy A/B/C categories; A/B/C describe *who procures*, B2B/B2C describe *the operating flow*. Right now only **B2C** is being built.
+
+**B2C — what we are building now:**
+1. Skope procures raw ingredients from vendors. Procurement happens at the **base kitchen only**.
+2. **Base kitchen = JP Nagar** (head office + central warehouse). The **Head Chef** runs it and prepares **sub-recipes in bulk**.
+3. Prepared sub-recipes are shipped to the **local / normal kitchens**.
+4. Local kitchens do **final assembly** of the customer dish only (fast, ~10 min). They do **not** procure from vendors and do **not** cook sub-recipes from raw.
+5. Trials & training happen **only at the base kitchen (JP Nagar)**. Local kitchens belong to the later live-operations phase.
+
+> This **inverts the earlier assumption** baked into some existing code and the older Feature Logs (§14–15), where every kitchen cooked its own sub-recipes from raw and pulled raw stock directly. Under B2C, sub-recipe **production is centralized at the base kitchen** and only **assembly** happens at local kitchens. Existing cascade/stock code still works for the base kitchen; extend it toward this model rather than assuming each kitchen is self-contained.
+
+**B2B — planned, NOT built (do not build until explicitly requested):**
+- The brand runs its **own sub-warehouse** and does its **own local procurement + dispatch**, bypassing the central base kitchen. Example brand: WrapOClock.
+- Requires per-brand warehouse entities and brand-local procurement flows. Deferred until the B2C build is complete and stable.
+
+---
+
 
 ### 2. Technology Stack
 - **Backend:** Node.js, Express.js
@@ -92,22 +117,40 @@ Skope Kitchens is a cloud kitchen operations company based in Bangalore, India. 
 
 ---
 
-### 3. User Roles
+### 3. User Roles & Dashboards
 
-**Admin Roles (no DB record, JWT-only, no _id)**
-- RECIPE_MANAGER — Recipe lifecycle, indent creation, brand stock transfer (role mismatch), archive brand stock (role mismatch), FCR, GRN view. Currently has production ledger write access it shouldn't have.
-- INGREDIENT_MANAGER — Indent verify/issue/delete, brand stock reconcile, stock updates. Correct role mapping.
-- WALLET_MANAGER — Wallet deductions, due amounts, financial admin. Correct role mapping.
-- ORDER_MANAGER — Dead role. Mentioned in requireAdmin helper but no token issuance possible. Never implemented.
+The system is being reorganized into **six role-scoped dashboards**. Some are new; others are re-scoped versions of the existing admin roles. The underlying **code roles** (`RECIPE_MANAGER`, `INGREDIENT_MANAGER`, etc.) still exist and continue to power the dashboards noted below — the dashboards are the product-level reframing, **not** a from-scratch auth rewrite.
 
-**Critical Auth Bug:** Admin tokens have no _id. req.user._id is undefined for all admin roles. Any controller using req.user._id will silently get undefined.
+**Auth status (corrected — supersedes older notes elsewhere in this file):** Admin users are now stored in the **`AdminUser` collection** with **bcrypt-hashed** passwords, and the JWT carries `_id`, `role`, `branchCode`, `warehouseId`, and `branchCodes`. The earlier "admins have no DB record / no `_id`" problem is **RESOLVED**. One cleanup remains: a legacy plain-text password fallback in `auth.controller.js` still needs removal before deployment.
 
-**Admin Login:** Plain text password comparison against env vars. Not bcrypt. Security gap.
+**The six dashboards:**
 
-**Database User Roles:**
-- client (User model) — Brand operators. Have wallet, orders, kitchen inventory, dashboard
-- vendor (Vendor model) — Ingredient suppliers
-- consumer (Consumer model) — End consumers
+1. **Client dashboard** — *foundation exists.* Brand operators (User model). Strictly **read-only EXCEPT**: submit menu, submit projections (gated until subscription is paid), and pay invoices via Razorpay/wallet. Stage-gated lifecycle: signup (name, company, email, mobile) → menu enabled → **menu submission triggers trials/training** → subscription invoice (sent by POC) paid into wallet → POC sets go-live on Swiggy/Zomato → **sales/order data + projection submission unlock**. The full dashboard shell is visible from first login but empty until data exists. Client CANNOT input stock, FCR, SOP, task statuses, or go-live status, and never sees the B2B/B2C flag.
+
+2. **POC dashboard** — *new build.* Skope-side. **Two POCs share ONE dashboard** and manage **every** client from it. POCs input ALL operational data the client sees: FCR, daily stock (during trial/training), SOP, and task statuses (pending/completed — e.g. vendor sourcing, store branding, operation setup). They send the subscription invoice, set the go-live status, and set each client's internal **B2B/B2C** flag. **HARD REQUIREMENT:** a single standardized entry format/template (not free text) so what the client sees is consistent across both POCs.
+
+3. **Stock Manager dashboard (base kitchen)** — *re-scoped from the Ingredient Admin (`INGREDIENT_MANAGER`).* Lives at the base kitchen (JP Nagar). Owns vendor procurement, warehouse stock, indents, GRN, the new **Delivery QC gate**, and (post-trial) daily stock updates at the main kitchen.
+
+4. **Head Chef dashboard (base kitchen)** — *modified from the Recipe Admin (`RECIPE_MANAGER`).* Lives at the base kitchen (JP Nagar). Owns recipes/BOM, trials & training, projections (input enabled post-subscription), and **centralized sub-recipe production**.
+
+5. **Local Kitchen dashboard** — *new build; borrows from both Recipe + Ingredient admin.* For normal/local kitchens in the live-ops phase. Receives sub-recipes from the base kitchen, handles final assembly, local stock, fridge audit, and daily stock updates for its own kitchen.
+
+6. **Data Analyst dashboard** — *new build, done LAST.* Human analyst. Read-everything + manipulate across all roles: received-stock detail, Smart Plan outputs (orders brand-wise and kitchen-wise), closing-stock variance + financial-impact, FCR, order comparison. Built last because it **consumes** data the other dashboards must first **produce**. An automation engine for the analyst is acknowledged but is **NOT** a current priority.
+
+**Build order:** Client → POC → (Stock Manager + Head Chef + Local Kitchen — the data producers) → Data Analyst → analyst engine (future).
+
+**Data-emission note for producer dashboards (3/4/5):** each must emit the data the analyst will later read — e.g. the kitchen flow must log **realized consumption** (for realized FCR), and procurement must log **received-vs-ordered** (for variance). Build these hooks in as you go so the analyst dashboard isn't left with gaps.
+
+**Audit-storage rule (do NOT mix these up):** base-kitchen (Head Chef §21) and local-kitchen (Local Kitchen §22) closing-stock audits write to the **`producer_audits`** collection (keyed `{brandId, branchCode, scope, date, correctionSeq}`), **NOT** `stock_updates`. `stock_updates` remains exclusive to the client's brand-wide Daily Stock view (+ the Stock Manager warehouse audit) — its key isn't branch/scope-aware, so reusing it for producer audits would collide and corrupt Daily Stock.
+
+**Other roles (unchanged):**
+- `WALLET_MANAGER` — wallet deductions, due amounts, financial admin. Correct mapping.
+- `ORDER_MANAGER` — dead role, never implemented (no token issuance possible). Leave as-is or remove during cleanup.
+
+**Database user roles:**
+- **client** (User model) — Brand operators. Have wallet, orders, kitchen inventory, dashboard.
+- **vendor** (Vendor model) — Ingredient suppliers.
+- **consumer** (Consumer model) — End consumers.
 
 ---
 
@@ -127,10 +170,11 @@ Skope Kitchens is a cloud kitchen operations company based in Bangalore, India. 
 
 **brand_stocks** — Production inventory ledger (authoritative)
 - brandName, itemName, ingredientBrand, uom, qtyRemaining, status: Pending|Used|Archived
+- Now ALSO has: location (SEMI_FINISHED | BRANCH_KITCHEN | WAREHOUSE_DRY|CHILLER|FREEZER), ownedBy, branchCode, qtyReserved
 - history: [{ type: ISSUE|TRANSFER_IN|TRANSFER_OUT|RECONCILIATION, qty, uom, at, fromBrandName, toBrandName, note }]
-- Unique index: { brandName, itemName, ingredientBrand }
+- Unique index (current): { brandName, itemName, ingredientBrand, location, branchCode } — each item tracked separately per location per branch. (The older { brandName, itemName, ingredientBrand } index is superseded.) See Feature Logs §14–15.
 - Most ERP-mature collection. Has embedded history, atomic mutations, soft deletes.
-- Missing: location, ownedBy, branchCode, actorId
+- (actorId still not added.)
 
 **kitcheninventory** — Client consumption inventory (to be retired)
 - clientId → User._id, ingredientId → ItemMaster._id, availableQty
@@ -170,20 +214,20 @@ Skope Kitchens is a cloud kitchen operations company based in Bangalore, India. 
 **P1 — Data Corruption Risks**
 - Transfer half-commit — source debit atomic, destination credit separate. If credit fails, stock disappears permanently.
 - Wallet balance TOCTOU — concurrent pay requests can both pass balance check and double-spend.
-- Indent double-issue — not atomic. Two concurrent issue requests double-credit brand_stocks.
+- Indent double-issue — not atomic. Two concurrent issue requests double-credit brand_stocks. **[RESOLVED — atomic findOneAndUpdate with status guard; see Feature Log §15]**
 - KitchenInventory silent failure — payment succeeds, inventory not updated, no recovery path.
 
 **P2 — Role and Security Issues**
 - RECIPE_MANAGER has production ledger write access it shouldn't
 - /debug/db is PUBLIC with NO AUTH — exposes DB structure
-- Admin passwords stored as plaintext in env vars
+- Admin passwords stored as plaintext in env vars **[PARTIALLY RESOLVED — bcrypt is now primary via the AdminUser collection; a legacy plain-text fallback in auth.controller.js still needs removal before deployment]**
 - ORDER_MANAGER role is dead code
 
 **P3 — Architectural Gaps**
 - Order state machine not wired — status never changes from PLACED
 - brandsMatch bidirectional substring — cross-brand data visibility risk
 - ItemMaster.strict: false — arbitrary fields can persist
-- Admin req.user._id is undefined — latent risk
+- Admin req.user._id is undefined — latent risk **[RESOLVED — admins now stored in AdminUser collection with _id carried on the JWT]**
 
 ---
 
@@ -232,35 +276,32 @@ Critical issues:
 
 ### 10. Implementation Roadmap
 
-**Phase 0 — Fix Live Risks FIRST**
-- Fix RECIPE_MANAGER role on transfer/archive routes
-- Fix wallet balance TOCTOU
-- Add /debug/db auth gate
+**Direction:** Build the six dashboards in order (see "User Roles & Dashboards"), **B2C only**. Borrow specific proven features from the **Swanky** single-brand reference app, adapted to Skope's multi-brand, multi-kitchen, **dish/menu** model.
 
-**Phase 1 — Foundation**
-- Unified inventory ledger migration
-- Order state machine transition endpoints
-- Recipe versioning
+**Pre-deployment fixes (do first — security / data-safety):**
+- Add `/debug/db` auth gate (currently public, no auth).
+- Remove the legacy plain-text admin password fallback in `auth.controller.js`.
+- Wallet balance TOCTOU fix (concurrent pay double-spend) — required when the wallet is wired to production payment.
 
-**Phase 2 — Rista Core**
-- Background Rista polling job
-- RistaOrder collection
-- RistaItemMapping + admin UI
+**Dashboard build sequence:**
+1. **Client dashboard** — ✅ **BUILT (B2C)** — see Feature Log §16. Stage-gated lifecycle (AWAITING_MENU→IN_TRIAL→LIVE), drawer layout, menu + gated-projection input, read-only views, wallet + invoice payment (onboarding/procurement/subscription via `/api/client/invoices/:id/pay`; production via existing production-order pay). Onboarding tasks reuse `BrandServiceChecklist`. TEMP POC writers stand in until the POC dashboard exists.
+2. **POC dashboard** — ✅ **BUILT (B2C)** — see Feature Log §17. Client list (search/stage filter, onboarding %), per-client workspace, brand-scoped + phase-scoped FCR price entry, daily stock, SOP links, procurement mode + ingredient list, branch assignment, trigger-only invoicing, view-only menu/projections, clientType flag + go-live. The TEMP admin invoice/go-live writers were migrated here and deleted.
+3. **Producer dashboards** — Stock Manager, Head Chef, Local Kitchen — including the data-emission hooks the analyst will read.
+   - **Stock Manager** — ✅ **BUILT (B2C)** — see Feature Log §20. New `/stock-manager` route (INGREDIENT_MANAGER, the same code role, now reframed as Stock Manager). Brand-picker home + per-brand workspace (Stock Overview, incoming Indents, GRN+Delivery QC, Purchases Log, Closing Stock Audit with lock + stacked corrections, Reorder Insights) + global Vendors. New `procurement_logs` collection is the Data Analyst's primary read source — every write path emits one entry. Ingredient-Admin views migrated out of `AdminDashboard.jsx` (preserved as `AdminDashboard.legacy.jsx`).
+   - **Head Chef** — ✅ **BUILT (B2C)** — see Feature Log §21. New `/head-chef` route (RECIPE_MANAGER). Built ALONGSIDE the legacy `AdminDashboard.jsx` (NOT a migration/removal) — the recipe editor stays reachable via an "Open Recipe Editor" link. **Recipe editing still lives in AdminDashboard:** `/head-chef`'s Recipes/Trials/Training tabs are navigation entry points (links to `/add-recipe`/`/add-trial-recipe`/`/add-training-recipe` for creation; AdminDashboard modals for editing existing BOMs), not native editors. **Follow-up flagged: a native recipe editor inside `/head-chef` is a PREREQUISITE for removing the legacy recipe-admin views from `AdminDashboard.jsx`. Until that's built, the legacy AdminDashboard remains the recipe-editing surface and must NOT be removed.**
+   - **Local Kitchen** — ✅ **BUILT (B2C)** — see Feature Log §22. New `LOCAL_KITCHEN` role + `/local-kitchen` route, one branch-scoped login per kitchen.
+   - **Head Chef carry-forward (RESOLVED in §21):** the legacy "Stock (Rista)" POS-inventory lookup now lives on the Head Chef dashboard as **Stock (Rista) Reconciliation** (`GET /api/head-chef/rista-stock-comparison` — joins `ristaClient.getInventory` vs Purchase Register, graceful empty state when Rista isn't configured for a branch). Done.
+4. **Data Analyst dashboard** — consumes the above.
+5. **Analyst automation engine** — future.
 
-**Phase 3 — Inventory Causality**
-- Batch production workflow (Tier 2)
-- Production deduction on KDS Ready
-- Low stock alerts
+**Swanky feature borrowings:**
+- *Now:* procurement-from-vendor workflow; **Delivery QC gate** (planned vs purchased vs received, QC status before stock is credited); **Smart Plan pipeline** (forecast → shopping cart — adapt box→dish); **closing-stock variance + financial-impact** reporting; **realized-vs-theoretical FCR** (compare BOM-theoretical cost to actual consumption — the gap is yield leakage); **forecast-vs-actual order comparison**, wired into Smart Plan.
+- *Later:* Telegram daily report / low-stock alerts; "Copy for WhatsApp" shopping cart; price governance (market-drift / margin-erosion).
+- *Two constraints on ALL borrowings:* (a) Swanky is box-centric, Skope is dish/menu-centric — the math transfers, the "box" wrapper does not; (b) realized FCR requires real consumption logging through the cascade + fridge/spoilage audit (partially in place).
 
-**Phase 4 — Operational Intelligence**
-- Daily reconciliation job
-- Live FCR engine with Rista revenue
-- Procurement recommendation engine
+**Sequencing dependency:** Smart Plan, realized FCR, and order comparison all sit on top of the B2C base→local architecture and the role remap — settle those before building the analytics layer, or it becomes rework.
 
-**Phase 5 — Advanced**
-- Branch transfer intelligence
-- Recipe lifecycle enforcement
-- Demand forecasting
+**Deferred (do NOT build until requested):** B2B operating flow (own sub-warehouse + local procurement); low-stock auto-indent assist; analyst automation engine; first-time-ingredient Out-of-Stock exception.
 
 ---
 
@@ -383,6 +424,326 @@ Earlier there was a confusing split between "real warehouse" (`brand_stocks`) an
 **Files involved:**
 - `backend/models/ingredientIndent.js`, `backend/controllers/ingredientIndent.controller.js`, `backend/controllers/purchaseRegister.controller.js`, `backend/controllers/projection.controller.js`
 - `frontend/src/pages/AdminDashboard.jsx` (Ingredient Admin Inventory modal + GrnModal), `frontend/src/pages/admin/ProjectionReview.jsx`
+
+## 16. Feature Log — Client Dashboard (built, B2C)
+
+**What it is:** The first of the six role-scoped dashboards (see "User Roles & Dashboards"). A fully re-laid-out, read-only-except-where-noted client/brand dashboard at `/dashboard`. The old client dashboard was preserved verbatim as `frontend/src/pages/Dashboard.legacy.jsx` (not routed) for rollback; the new shell replaced `Dashboard.jsx` in place.
+
+**Layout:** Top-right Logout. Retractable left drawer (collapse/expand toggle) with, in order: Service Onboarding Status · Enter Projections (locked unless LIVE) · Daily Stock · Food Cost/FCR · Per Day Analytics · Analytics (Date Range) · Invoices · Wallet & Transactions · Profile. Each drawer item opens as its own in-shell page. HOME page (Menu lives here, not in the drawer): clickable wallet balance in the top bar → wallet modal; brand name + logo (click logo → change-logo popup); `<h1>` "Brand Dashboard"; a horizontal branch selector; and the Menu section as focal element (reuses the existing Enter-Menu popup + a read-back of the submitted menu for the selected branch). The "Meeting Time Left" tracker from the legacy dashboard was removed.
+
+**Lifecycle (stage-gated):** `AWAITING_MENU` → (first menu submit) → `IN_TRIAL` → (POC go-live) → `LIVE`. Enforced on BOTH frontend (locked UI) and backend (403): Enter Projections + both Analytics views require `LIVE`. Menu submit and viewing onboarding/daily-stock/FCR/invoices/wallet/profile are available earlier.
+
+**Schema additions (on the `User` model only):** `logoUrl`, `assignedBranches` (default `["JPNAGAR","TESTBRANCH"]`), `lifecycleStage` (enum AWAITING_MENU|IN_TRIAL|LIVE, default AWAITING_MENU), `invoices[]` (`{type: ONBOARDING|PROCUREMENT|SUBSCRIPTION|PRODUCTION, amount, status: UNPAID|PAID, branchCode, createdAt}`). Branch display names (`JPNAGAR`→"Main Kitchen", `TESTBRANCH`→"Test Branch") are a frontend/controller constant, not stored.
+
+**Onboarding tasks — REUSED, not duplicated:** The 15 onboarding tasks already existed as `BrandServiceChecklist` + the `MASTER_SERVICES` list in `admin.brand.routes.js`, surfaced by `GET /api/services/client`. The client dashboard reuses this as the single source of truth — **no new `onboardingTasks` field was added** to the User (avoids dual source of truth). `GET /api/client/onboarding-status` returns `lifecycleStage` + the checklist mapped to `{taskName, status}`. The POC "onboarding-task writer" is the **existing** `PATCH /api/admin/services/:brandId` (no duplicate created).
+
+**New backend — `/api/client` (controller `client.controller.js`, routes `client.routes.js`):** every endpoint requires `role === "client"`, scopes by the caller's own `brandName`, and validates `branchCode ∈ assignedBranches` (403 otherwise).
+- `GET /profile`, `PATCH /logo` (pushes a pasted image URL through Cloudinary, stores secure_url)
+- `GET /branches` (→ `[{branchCode, displayName}]`)
+- `GET /onboarding-status`
+- `GET /menu?branchCode=` (client reads back their OWN submitted menu — the existing list endpoint is admin-only, so this small read was added; submission still reuses `POST /api/menu-entries`)
+- `GET /daily-stock?date=` (reads `stock_updates`; **brand-wide — see branch note**)
+- `GET /fcr` (reuses the costing engine via new `computeBrandFcrSummary(brandName)` exported from `costing.controller.js`; **brand-wide**)
+- `GET /analytics/daily?branchCode=&date=` and `GET /analytics/range?branchCode=&startDate=&endDate=` — **403 unless LIVE**, Rista-backed, branchCode→Rista code mapped (`JPNAGAR`→`BEN`, etc; unmapped branches fall back to the brand's configured Rista codes)
+- `GET /invoices?branchCode=` (merges User.invoices + PRODUCTION invoices read from `production_orders` with cost > 0)
+- `POST /invoices/:id/pay` (atomic, balance-safe wallet deduction + mark the manual invoice PAID via `arrayFilters`; PRODUCTION invoices are rejected here — paid via the existing production-order pay route)
+
+**Branch-scoping note (important):** `stock_updates` (`{brandId, date}`) and FCR/recipes are NOT branch-scoped in their schemas, and those schemas were NOT changed. So **Daily Stock and FCR pages have NO branch dropdown** — they show a "Shown brand-wide (not branch-specific)" label instead. Menu, Projections, both Analytics, and Invoices ARE genuinely branch-scoped.
+
+**Reused money flows (not re-implemented):** wallet balance/transactions (`GET /api/wallet`), recharge + Pay-Due (`/api/wallet/create-order` + `/verify`), production-invoice banner + pay (`/api/production-orders/my-pending`, `/:id/pay`). **GST:** `applyGst:true` is sent ONLY on the Pay-Due path; recharge (₹500/₹1000/custom) and the new `/api/client/invoices/:id/pay` apply NO GST.
+
+**Lifecycle hooks added (additive) to existing controllers:**
+- `menuEntry.controller.js createMenuEntry`: first successful submit flips `AWAITING_MENU → IN_TRIAL` (idempotent `updateOne` guarded on current stage; best-effort, never blocks the save).
+- `projection.controller.js createProjection`: 403 unless `lifecycleStage === LIVE` (re-reads from DB).
+
+**TEMP POC writers (in `admin.brand.routes.js`, WALLET_MANAGER-guarded, marked "temporary — replaced by POC dashboard"):** `POST /api/admin/client/:clientId/invoice` (raises an ONBOARDING/PROCUREMENT/SUBSCRIPTION invoice onto a client) and `PATCH /api/admin/client/:clientId/go-live` (sets `lifecycleStage: LIVE`). Go-live is intentionally NOT gated on "subscription paid" yet — the POC dashboard will own that later.
+
+**Behavior-preserving refactor:** the per-day Rista brand summary inlined in `GET /api/analytics/sales/summary` was extracted verbatim into `backend/utils/salesSummary.js` (`computeBrandSalesSummary`). The analytics route and the new client analytics endpoints now share it; the existing route's output shape is unchanged.
+
+**Files involved:**
+- `backend/models/user.js` (schema additions), `backend/controllers/client.controller.js` (new), `backend/routes/client.routes.js` (new), `backend/utils/salesSummary.js` (new), `backend/controllers/costing.controller.js` (`computeBrandFcrSummary` export), `backend/routes/analytics.routes.js` (uses shared helper), `backend/controllers/menuEntry.controller.js` + `backend/controllers/projection.controller.js` (lifecycle hooks), `backend/routes/admin.brand.routes.js` (TEMP POC endpoints), `backend/index.js` (mounts `/api/client`)
+- `frontend/src/pages/Dashboard.jsx` (new client shell), `frontend/src/pages/Dashboard.legacy.jsx` (verbatim rollback copy, not routed)
+
+**Deferred (not built):** Data Analyst dashboard, realized FCR, and the analyst engine — per the build order. (POC dashboard is now BUILT — see §17.)
+
+## 17. Feature Log — POC Dashboard (built, B2C)
+
+**What it is:** The second of the six role-scoped dashboards. A Skope-internal POC (Point of Contact) tool at `/poc`. TWO POCs share ONE login and manage EVERY client from one dashboard (no per-POC client subsets). The POC owns the operational data the client views read-only.
+
+**New role:** `POC` added to the `AdminUser.role` enum and to `authMiddleware`'s `ADMIN_ROLES` set. Seeded as ONE shared account from `ADMIN_POC_USERNAME`/`ADMIN_POC_PASSWORD` (bcrypt, same pattern as other admins) in `seedAdminUsers.js`. **Run `node backend/scripts/seedAdminUsers.js` once after deploy** so the shared POC login exists. JWT carries `adminId` + `role: "POC"`. All `/api/poc/*` routes are gated by `requireRole("POC")`.
+
+**Money is FROZEN — untouched.** The POC renders NO wallet/balance/GST UI and contains NO money logic. Invoices are append-only UNPAID *records* on `User.invoices`; the existing frozen wallet flow settles them when the client pays. No wallet balance/dueAmount/GST/Razorpay code was touched or added.
+
+**Schema additions (additive only):**
+- `AdminUser.role` enum gains `"POC"`.
+- `User`: `clientType` enum `["B2C","B2B"]` default `"B2C"` (internal, POC-set, NEVER returned by the client controller); `sopDocuments: [{ title, link, updatedAt }]` (links only); `procurement: { trial: { mode, ingredientList: [{itemName,uom,qty}], listSentAt }, training: { ... } }` where `mode` ∈ `["SKOPE_PROCURES","CLIENT_PROCURES"]`, default both `SKOPE_PROCURES`.
+- Reuses existing client fields from §16 (`assignedBranches`, `lifecycleStage`, `invoices[]`, `logoUrl`) — no duplication.
+
+**FCR price entry — BRAND-SCOPED + PHASE-SCOPED (the key correctness fix):** The client-visible FCR (`computeBrandFcrSummary → calculateRecipe → expandItem`) reads `netPrice` off `MainRecipe`/`SubRecipe` items only; the `trial_recipes`/`training_recipes` collections are separate and NOT read by it. So the POC price write (`POST /api/poc/clients/:clientId/fcr-item` `{ phase, refId, uom, unitPrice, yieldPercent }`) computes `netPrice = unitPrice / (yieldPercent/100)` (the §9 formula) and writes it to (a) the phase collection (`TrialRecipe`|`TrainingRecipe`) AND (b) the brand's `MainRecipe` + `SubRecipe` items — all filtered by an EXACT brand match (anchored case-insensitive regex), so another brand's FCR can never move. The global `bulkUpdateIngredientPrices` was deliberately NOT reused (it is cross-brand). `recipesUpdated: 0` simply means the Head Chef hasn't built recipes carrying that ingredient yet — not an error.
+
+**Procurement path (gates WHEN a price is entered):** `PATCH .../procurement-mode` sets a phase to `SKOPE_PROCURES` or `CLIENT_PROCURES`. `POST .../procurement-list` generates the phase's ingredient list READ-ONLY from the brand's trial/training BOMs (reusing `extractIngredientsFromBOM` + `aggregateIngredients`), snapshots it, and marks it "sent". On `CLIENT_PROCURES`, `postFcrItem` is hard-blocked (409) until the list is sent — prices are entered only after the client purchases. On `SKOPE_PROCURES`, prices are entered directly and a `PROCUREMENT` invoice can be raised (trigger-only). If the brand has no trial/training recipes yet, the list is empty and is NOT marked sent — no fabricated data.
+
+**Reused, not duplicated:** onboarding tasks = `BrandServiceChecklist` (the 15 `MASTER_SERVICES`, now extracted to shared `backend/utils/masterServices.js` and imported by both `admin.brand.routes.js` and the POC controller); daily stock = `stock_updates`/`StockUpdate` shape, brand-wide (no fake branch dropdown), writes only `stock_updates` (not the P1-sensitive `brand_stocks` ledger); menu = `menu_entries`; projections = existing `Projection` model `{ brandId }` query (no schema change); FCR summary = `computeBrandFcrSummary`.
+
+**Future data sources:** `backend/services/pocData.service.js` is the seam where the POC's read views will later source LIVE data from the producer dashboards (Head Chef → production status; Stock Manager → warehouse/GRN/QC; Local Kitchen → local stock/fridge audit). Today each returns current POC-entered data or an explicit `NOT_AVAILABLE_YET` empty shape — clearly-marked `// FUTURE:` stubs, NO invented routes for unbuilt dashboards. Surfaced via `GET .../fcr-summary` and `.../producer-data`.
+
+**TEMP-endpoint migration (cleanup of §16 scaffolding):** the temp `POST /api/admin/client/:clientId/invoice` and `PATCH /api/admin/client/:clientId/go-live` (WALLET_MANAGER-gated) were migrated to `POST /api/poc/clients/:clientId/invoice` and `PATCH /api/poc/clients/:clientId/go-live` (POC-gated) and **deleted** from `admin.brand.routes.js` — grep confirmed no frontend caller (the client dashboard uses its own `/api/client/...` routes). Go-live still carries a `// TODO: gate on subscription paid` comment (finance ownership unresolved/FROZEN).
+
+**Endpoints (`/api/poc`, all POC-gated; each validates the clientId exists and branchCode ∈ assignedBranches):** `GET /clients` (`?search=&stage=`), `GET /clients/:id`, `GET/PATCH .../onboarding[-task]`, `GET/POST .../daily-stock`, `GET .../fcr-items` + `POST .../fcr-item` + `GET .../fcr-summary` + `GET .../producer-data`, `GET/POST .../sop`, `PATCH .../branches`, `POST/GET .../invoice[s]`, `PATCH .../procurement-mode` + `POST/GET .../procurement-list`, `GET .../menu` + `GET .../projections`, `PATCH .../client-type` + `PATCH .../go-live`.
+
+**Files involved:**
+- `backend/models/adminUser.js` (+POC enum), `backend/middleware/auth.js` (+POC in ADMIN_ROLES), `backend/scripts/seedAdminUsers.js` (+POC block), `backend/.env` (+`ADMIN_POC_*`), `backend/models/user.js` (+`clientType`, `sopDocuments`, `procurement`)
+- `backend/controllers/poc.controller.js` (new), `backend/routes/poc.routes.js` (new), `backend/services/pocData.service.js` (new), `backend/utils/masterServices.js` (new, shared), `backend/index.js` (mounts `/api/poc`), `backend/routes/admin.brand.routes.js` (TEMP routes deleted; imports shared MASTER_SERVICES)
+- `frontend/src/pages/PocDashboard.jsx` (new), `frontend/src/App.jsx` (+`/poc` route)
+
+**Deferred (not built):** Data Analyst dashboard, realized FCR, analyst engine — per the build order.
+
+## 18. Feature Log — Per-Iteration FCR + POC Confirmation Gate (built)
+
+**What it is:** FCR is now computed independently per recipe iteration — T1, T2, T3 (trial), TR1, TR2, TR3 (training), and Final (MainRecipe) — instead of only the final recipe. This fixes a cross-write bug and adds a POC confirmation gate so the client only ever sees iterations the POC has explicitly signed off on.
+
+**The bug that was fixed:** `postFcrItem` (POC price entry) used to write the same ingredient price simultaneously onto `MainRecipe` + `SubRecipe` + whichever phase model (Trial/Training) was selected, via one `updateMany` loop over all three. That meant entering a price on a T1 trial immediately overwrote the brand's Final recipe cost too. Now each price save is scoped to exactly ONE iteration document — brand + exact `recipeName` + phase + code (T1/TR2/etc, or no code for Final) — never multiple collections/iterations at once. `postFcrItem` body is now `{phase, recipeName, code, refId, uom, unitPrice, yieldPercent}` (was missing `recipeName`/`code` before; the price-entry UI is now iteration-scoped, not a flat brand-wide ingredient list).
+
+**POC can now edit FINAL too:** previously FINAL/MainRecipe was only reachable via the old (buggy) simultaneous write. Now POC explicitly selects phase `FINAL` and edits MainRecipe directly, scoped to that one dish — for correction/confirmation, not as a side effect of trial edits.
+
+**Confirmation gate (new collection `fcr_confirmations`, model `backend/models/fcrConfirmation.js`):** `{brandName, recipeName, phase, code, confirmed, confirmedBy, confirmedAt}`, unique on `{brandName, recipeName, phase, code}`. No iteration is visible to the client until the POC explicitly confirms it via `PATCH /api/poc/clients/:clientId/fcr-confirm`. Editing a price on an already-confirmed iteration auto-un-confirms it (forces re-confirmation, so the client never sees stale-confirmed data after a price change). The POC's view (`GET .../fcr-summary`) shows ALL iterations regardless of confirmation state, each tagged `{confirmed, confirmedBy, confirmedAt}`; the client's view (`GET /api/client/fcr/dishes`) only returns confirmed iterations — a dish with zero confirmed iterations still appears (so the client knows the dish exists) with an "Awaiting confirmation" state instead of being hidden.
+
+**Bug fix — sub-recipes were missing from the displayed ingredient list (totalCost was always correct):** `iterationFcr.js`'s `buildItemRows` originally filtered to `type === "INGREDIENT"` only, silently dropping any `SUBRECIPE` line from a recipe's BOM in the UI — even though `calculateRecipeFromItems`'s cost math (via `expandItem`/`resolveSubRecipe`/`sumSubRecipeCost`) already correctly included sub-recipe cost in `totalCost` (level-0 SUBRECIPE breakdown entries were always summed in). Fixed by exporting `calculateCost`/`resolveSubRecipe`/`sumSubRecipeCost` from `costing.controller.js` (no logic changes — just `export` added) and reusing them in a new `buildSubRecipeRow()` in `iterationFcr.js`, which resolves the sub-recipe doc, computes its cost the same way `expandItem` does, and recursively builds its constituent ingredient rows (handles nested sub-recipes, same circular-ref guard pattern). `FcrIterationTimeline.jsx` renders sub-recipe rows as an expandable `▸ Name (sub-recipe)` line (qty, yield%, total cost) that reveals its own ingredient rows (same columns as direct ingredients) on click, indented one level, recursively for further nesting. `expandItem`, `resolveSubRecipe`'s logic, `calculateRecipeFromItems`, and recipe schemas were not modified — display-layer fix only.
+
+**Bug fix — ₹NaN editing a sub-recipe price, then corrected again (manual override replaced with flattened ingredient pricing):** the first fix gave SUBRECIPE rows their own editable `netPrice`/`unitPrice` (defaulting to ₹0), which solved the NaN but introduced a worse problem — every never-manually-priced sub-recipe would silently show/total as ₹0, understating iteration cost without any visible error. Reverted that override path. The correct fix: sub-recipe cost must always be COMPUTED from its own ingredients (exactly what `calculateRecipeFromItems`/`expandItem`/`resolveSubRecipe`/`sumSubRecipeCost` already do — untouched), never manually entered as the default path.
+- `iterationFcr.js`'s display rows (`buildItemRows`/`buildSubRecipeRow`) are back to computed-cost-only for SUBRECIPE rows (no editable netPrice/unitPrice on the sub-recipe entry itself).
+- New `buildEditableIngredients()` in `iterationFcr.js` produces a SEPARATE flat list (`iteration.editableIngredients`) for price entry only: direct ingredients on the iteration, PLUS ingredients nested inside any sub-recipe it uses, flattened recursively (handles nested sub-recipes-within-sub-recipes) — never a row for the sub-recipe itself. Each row carries `source: "ITERATION"|"SUBRECIPE"` and, for nested rows, `subRecipeName`/`subRecipeBrand` (the actual resolved sub-recipe doc identity) so the UI/backend know where to write.
+- `postFcrItem` (`poc.controller.js`) now takes `source`/`subRecipeName`/`subRecipeBrand` instead of the removed `itemType`. `source: "ITERATION"` writes the one iteration document as before (brand+recipeName+phase+code scoped). `source: "SUBRECIPE"` writes the shared `SubRecipe` document instead (matched by exact brand+recipeName) — pricing a nested ingredient updates that sub-recipe's cost everywhere it's used by any dish/iteration, exactly like the rest of the BOM already works (not iteration-scoped, by design). Auto-un-confirm still only un-confirms the iteration currently being viewed.
+- `PocDashboard.jsx`'s "Edit Iteration Price" table now reads `iteration.editableIngredients` (not `iteration.items`) and shows a "From" column ("Direct" vs "‹Sub-recipe name› (sub-recipe)"). The read-only `FcrIterationTimeline.jsx` view (`iteration.items`) is unchanged from the original sub-recipe-display fix — sub-recipes still show as an expandable line with their computed total cost and constituent ingredients.
+- Confirmed: no iteration ever shows ₹0 for a sub-recipe unless its ingredients are genuinely unpriced (a real, visible gap — not a fabricated placeholder); `totalCost` per iteration still equals exactly what `calculateRecipeFromItems` produces, since that function and `expandItem`/`resolveSubRecipe`/`sumSubRecipeCost` were never modified by either fix.
+
+**UX — one "Save Changes" button per iteration instead of one per ingredient row, PLUS a separate "Confirm" button (two distinct actions, not merged):** `PocDashboard.jsx`'s edit table has no per-row Save button. Editing a price/yield input marks that row's key in local `edits` state and highlights the row (amber background + "● Unsaved" tag). Below the table, two buttons sit side by side:
+- **"Save Changes"** (blue) — fires one `POST /api/poc/clients/:clientId/fcr-item` per row actually present in `edits` (via `Promise.allSettled`), reports saved-vs-failed, clears `edits`, reloads. Only persists prices — does NOT touch confirmation state (existing auto-un-confirm-on-edit behavior in `postFcrItem` is unchanged and still fires server-side if the iteration was confirmed).
+- **"Confirm `<iteration>`" / "Un-confirm"** (green/grey) — calls the same `toggleConfirm` used by `FcrIterationTimeline`'s confirm buttons, scoped to the currently-selected dish+iteration. **Disabled whenever `changedKeys.length > 0`** (unsaved edits pending) or while saving — forces Save before Confirm is clickable, so the POC can never confirm an iteration with stale/unsaved prices. A status pill ("✓ Confirmed — visible to client" / "Pending — not visible to client") sits next to both buttons reflecting `iteration.confirmed`.
+Only confirmed iterations are ever returned to the client by `GET /api/client/fcr/dishes` (unchanged gate). Purely a frontend interaction change — `postFcrItem`, `patchFcrConfirm`, `source`/`subRecipeName` routing, and auto-un-confirm are unchanged.
+
+**No real FCR % exists anywhere** (no stored selling price on any recipe) — the UI shows `totalCost`/`suggestedSellingPrice` per iteration with trend arrows (cost going down = improvement), not a true cost÷price ratio. This was a pre-existing constraint, not introduced by this feature.
+
+**New reusable engine (`backend/utils/iterationFcr.js`, `getDishIterations(brandName)`):** groups `TrialRecipe`/`TrainingRecipe` (recipeType `MAIN` only) + `MainRecipe` docs by trimmed-lowercased `recipeName`, runs each iteration's `items` through the existing `expandItem()`/`resolveSubRecipe()` traversal — now extracted from `costing.controller.js`'s `calculateRecipe()` into a reusable `calculateRecipeFromItems(items, brand)` (zero changes to `expandItem()` itself). Sub-recipe items inside trial/training recipes still always resolve against the final `SubRecipe` collection (unchanged — confirmed this was already how `AddTrialRecipe.jsx`/`AddTrainingRecipe.jsx` populate sub-recipe dropdowns).
+
+**Frontend:** new shared component `frontend/src/components/FcrIterationTimeline.jsx` (tile grid → click dish → iteration chips with trend arrows → click iteration → ingredient breakdown table) used by both dashboards. Client `Dashboard.jsx` `FcrView` is now read-only timeline browsing. POC `PocDashboard.jsx` `FcrView` shows the same timeline (with confirm/un-confirm buttons) plus a separate "Edit Iteration Price" panel — dish + iteration dropdowns, then an editable ingredient table that saves via the now-iteration-scoped `postFcrItem`. `AddTrialRecipe.jsx`/`AddTrainingRecipe.jsx` got a one-line reminder near Recipe Name to keep dish names spelled identically across iterations (required for the grouping to work). `SopView` got a soft, non-blocking note that SOPs are typically created during training.
+
+**Files involved:**
+- `backend/controllers/costing.controller.js` (extracted `calculateRecipeFromItems`), `backend/utils/iterationFcr.js` (new), `backend/models/fcrConfirmation.js` (new)
+- `backend/controllers/client.controller.js` (+`getDishIterations`), `backend/routes/client.routes.js` (+`GET /fcr/dishes`)
+- `backend/controllers/poc.controller.js` (`postFcrItem` rewritten to be iteration-scoped + auto-unconfirm; +`patchFcrConfirm`; `getFcrSummary` now joins confirmations), `backend/routes/poc.routes.js` (+`PATCH /fcr-confirm`), `backend/services/pocData.service.js` (`getFcrSummary` rewritten on `getDishIterations`)
+- `frontend/src/components/FcrIterationTimeline.jsx` (new, shared), `frontend/src/pages/Dashboard.jsx` (`FcrView` rewritten), `frontend/src/pages/PocDashboard.jsx` (`FcrView` rewritten, `SopView` note), `frontend/src/pages/AddTrialRecipe.jsx`, `frontend/src/pages/AddTrainingRecipe.jsx` (reminder text)
+
+**Deferred (not built):** "Promote training recipe to Final" (Head Chef territory), realized/actual-spend FCR.
+
+## 19. Feature Log — Per-Client Custom Onboarding Tasks (built)
+
+**What it is:** The POC dashboard's Onboarding Status board can now add/remove tasks per client, on top of the existing 15 `MASTER_SERVICES` toggle-only behavior. Purely additive — toggling status (`PATCH .../onboarding-task`) is unchanged.
+
+- `POST /api/poc/clients/:clientId/onboarding-task` `{ taskName }` — appends a new PENDING task to that client's `BrandServiceChecklist.services` only (other clients and the `MASTER_SERVICES` seed list are untouched). Rejects empty/whitespace names and case-insensitive duplicates within that same client's list ("Task already exists").
+- `DELETE /api/poc/clients/:clientId/onboarding-task` `{ taskName }` — removes a task (case-insensitive match) from that client's list only, permanently. Not protected: the original 15 seeded tasks can be removed exactly like a custom one — 404 if the name isn't found. A completed task can be removed with no special blocker.
+- `onboardingPercent()` (`poc.controller.js`) was already `completed / services.length` (never hardcoded `/15`) — confirmed correct, no change needed there; it now naturally reflects each client's actual task count after adds/removes, both on the client-list % column and the per-client header.
+- New clients still seed from `MASTER_SERVICES` unchanged (`ensureChecklist()`'s create-if-missing + add-missing-master-services logic untouched) — custom tasks are added on top, never replacing the seed.
+- `client.controller.js`'s `getOnboardingStatus` (client-side read-only view) needed NO changes — it already maps `checklist.services` dynamically, so added/removed tasks just show up for that brand automatically.
+
+**Frontend (`PocDashboard.jsx`'s `OnboardingView`):** each task row gets an "✕" remove button using a click-twice confirm pattern (first click arms it — row turns red with a "Click ✕ again to remove permanently" warning — second click on the same task actually deletes; clicking a different task's ✕, or toggling any status, disarms it). Below the task list, a text input + "Add Task" button (Enter key also submits) posts the new task and reloads.
+
+**Files involved:**
+- `backend/controllers/poc.controller.js` (+`postOnboardingTask`, +`deleteOnboardingTask`), `backend/routes/poc.routes.js` (+`POST`/`DELETE /onboarding-task`)
+- `frontend/src/pages/PocDashboard.jsx` (`OnboardingView` rewritten with remove + add UI)
+
+**Not touched (out of scope):** the legacy `WALLET_MANAGER`-gated `/api/admin/services/:brandId` add/delete endpoints in `admin.brand.routes.js` (a separate, older admin-dashboard checklist UI) — left exactly as they were.
+
+## 20. Feature Log — Stock Manager Dashboard (built, B2C)
+
+**What it is:** The third of the six role-scoped dashboards (Dashboard #3, the first **producer** dashboard). A dedicated, brand-first tool at `/stock-manager` for the base-kitchen (JP Nagar) warehouse owner. It **re-scopes the existing `INGREDIENT_MANAGER` code role** (no new role) and **migrates** the Ingredient-Admin views out of `AdminDashboard.jsx` into their own dashboard. As a producer dashboard, every write path emits one `procurement_logs` entry — the Data Analyst dashboard's (#6) primary read source.
+
+**Role / routing:** No new role — `requireRole("INGREDIENT_MANAGER")` gates all `/api/stock-manager/*` routes. The POC routing-gap lesson is applied end-to-end: `Login.jsx` and `Navigation.jsx` send an INGREDIENT_MANAGER login straight to `/stock-manager` (keyed off the JWT role, not userType); `AdminDashboard.jsx` bounces them via `useEffect` AND gates the `BrandList` mount (`!isPoc && !isIngredientManager`) so `GET /api/admin/brands` never fires during the redirect frame.
+
+**Schema additions (all additive):**
+- `itemmasters` (still `strict:false`): typed `shelfLifeDays`, `minStockLevel`, `minStockUom` (operational thresholds, brand-agnostic; existing rows null → UI "Not set"). `reorderCadenceDays` deliberately NOT added — cadence is derived from purchase history.
+- `stock_updates`: `variances[]` (`{itemName,uom,expectedQty,actualQty,varianceQty,reason,reasonNote}`), `lockedAt`, `lockedBy`, `correctionSeq`, `correctionOf`. **Unique index changed** `{brandId,date}` → `{brandId,date,correctionSeq}` so post-lock corrections coexist as stacked records. The legacy index must be dropped once via `backend/scripts/migrateStockUpdateIndex.js`. Both legacy upserts (`stockUpdate.controller.upsertStockUpdate`, `poc.controller.postDailyStock`) were pinned to `correctionSeq:0` so they stay deterministic.
+- `vendors`: `status` (ACTIVE/INACTIVE), `notes`, `createdBy`, `lastDeliveryAt`.
+- **NEW `delivery_qc`** (`backend/models/deliveryQc.js`): 1:1 with a Purchase Register row; planned/purchased/received qty + qcStatus (PENDING|ACCEPTED|SHORT|REJECTED|PARTIAL).
+- **NEW `procurement_logs`** (`backend/models/procurementLog.js`): append-only event stream. Emitted via `backend/utils/procurementLog.js` `emitProcurementLog()` (best-effort, never throws/blocks a real write).
+
+**Endpoints (`backend/controllers/stockManager.controller.js`, routes `backend/routes/stockManager.routes.js`, mounted `/api/stock-manager`, all INGREDIENT_MANAGER-gated):**
+- `GET /brands-summary`, `GET /all-brands-rollup` — aggregations over `brand_stocks`/`purchase_register`/`ingredient_indents` (brand list sourced from client `User` records).
+- `GET /stock/:brandName` (+`/expiring?days=`, +`/low`) — Purchase Register batches joined with `itemmasters` thresholds; per-row `nearExpiry` (within `shelfLifeDays/2` of expiry OR within 5 days) + `belowMin` flags.
+- `GET /indents/:brandName?status=` — brand-scoped indent list with `source` (PROJECTION/CUSTOM, derived from `recipeKind`) + `warehouseStockAvailable`. **Verify/Issue REUSE the existing untouched `/api/ingredient-indent/:id/verify|issue`**; the UI calls `POST /indents/log` after a success so the analytics stream stays complete without modifying the frozen indent controller.
+- `POST /grn` + `GET /qc-failures` — GRN+QC in one form. Credits Purchase Register ONLY on ACCEPTED/PARTIAL (PARTIAL credits receivedQty); SHORT/REJECTED record a `delivery_qc` failure for Head-Chef visibility (no indent-status mutation — the indent enum was left frozen). Updates vendor `lastDeliveryAt`. Emits PURCHASE (on credit) + QC per item.
+- `GET /vendor-alerts/:brandName` + `DELETE /vendor-alerts/:id` — per-brand "Vendor Alerts" (the renamed Credit Note flow). Reads/deletes `credit_note_alerts`; resolve emits VENDOR_ALERT_RESOLVED. No money code.
+- `GET /purchases` — chronological Purchase Register view, QC joined; filters brand/vendor/item/from/to/qcStatus.
+- `GET/POST /closing-stock/:brandName`, `PATCH .../lock`, `POST .../correction` — daily audit. GET returns the locked records as a **stacked history** (original seq 0 + all corrections, never collapsed) or, when none exists, a system-expected snapshot from Warehouse Stock. Non-zero variance rows REQUIRE a reason. Lock sets `lockedAt`/`lockedBy` (immutable) and reconciles actuals into `brand_stocks` via the SAME RECONCILIATION pattern `upsertStockUpdate` uses. Corrections append new `correctionSeq` records (immutable). Closing-stock writes only `stock_updates` (never the P1-sensitive `brand_stocks` ledger directly, except the same best-effort reconcile sync). Emits STOCK_RECONCILED + VARIANCE_RECORDED.
+- `GET /reorder-insights/:brandName` — derived per-item cadence/advisory (OK|BELOW_MIN|NEAR_EXPIRY|CADENCE_DRIFT). Read-only; never auto-indents.
+- `PATCH /ingredient/:itemName` — Stock Manager owns the catalog thresholds. Emits INGREDIENT_THRESHOLD_SET.
+- `GET /vendors` (+`/:id` detail with recent purchases), `POST /vendors`, `PATCH /vendors/:id`, `PATCH /vendors/:id/status` — global vendor management (reuses the `Vendor` model; SM-created vendors get a random bcrypt password since they don't log in yet). Emits VENDOR_CREATED/VENDOR_UPDATED.
+
+**procurement_logs emitting paths (the analyst stream):** GRN→PURCHASE+QC; closing-stock lock/correction→STOCK_RECONCILED+VARIANCE_RECORDED; indent verify/issue→INDENT_VERIFIED/INDENT_ISSUED (via `/indents/log`); ingredient thresholds→INGREDIENT_THRESHOLD_SET; vendor create/update→VENDOR_CREATED/VENDOR_UPDATED; vendor-alert resolve→VENDOR_ALERT_RESOLVED.
+
+**Disposition of the 4 legacy Ingredient-Admin tools that were NOT auto-carried (decided after review):**
+- **Update Ingredients (bulk price)** — **permanently removed.** It posted to `bulkUpdateIngredientPrices` (`MainRecipe.updateMany` + `SubRecipe.updateMany` filtered by `items.refId` only, **no brand filter** = global cross-brand price writer). Restoring it would undo the POC build's deliberate per-brand-only fix (§17/§18). Per-brand price management lives in the POC dashboard. The code remains in `AdminDashboard.legacy.jsx` as record only.
+- **Stock (Rista)** — **deferred to the Head Chef dashboard** (see the carry-forward note in the roadmap above). Not restored here.
+- **Credit Note → renamed "Vendor Alerts"** — **FOLDED IN.** A new per-brand workspace drawer item "Vendor Alerts" (placed after GRN+QC) reads `GET /api/stock-manager/vendor-alerts/:brandName` and resolves via `DELETE /api/stock-manager/vendor-alerts/:id` (click-twice confirm). It's a Head-Chef→Stock-Manager operational handoff touching ONLY `credit_note_alerts` — **zero money code** (no wallet/dues/GST/Razorpay). The **collection name `credit_note_alerts` is unchanged** (only the UI label/drawer entry say "Vendor Alerts"). Resolving an alert hard-deletes it (mirrors legacy) AND emits a `VENDOR_ALERT_RESOLVED` procurement log carrying the ingredient/brand/note so the audit trail survives. The Head Chef still creates alerts via the existing `POST /api/credit-notes` (untouched).
+- **Check Stock → "All Audits"** — **FOLDED IN** as a top-level tab next to "Vendors". Read-only cross-brand/all-dates roll-up of `stock_updates`, reusing the existing `GET /api/stock-updates/all` with **no backend change** (brand/date filter + expandable item rows). Distinct from the per-brand Closing Stock Audit and from Stock Overview (Purchase Register).
+
+**Migration / cleanup:** `AdminDashboard.jsx` saved verbatim as `AdminDashboard.legacy.jsx` first. Then the 7 Ingredient-Admin modals (`InventoryModal`/Stock-Rista, `IngredientsModal`, `IngredientInventoryModal`, `CreditNoteModal`, `CheckStockModal`, `StockUpdateModal`, `PurchaseRegisterModal`) + their menu buttons, modal mounts, and `useState` were removed from `AdminDashboard.jsx` (grep-confirmed they're referenced nowhere else). The new dashboard rebuilds the Purchase-Register, indent-queue, and stock-update concepts cleanly against the new endpoints. The Recipe-Admin's `GrnModal` and all recipe-manager UI are untouched. No backend routes were deleted (the new dashboard still uses `/api/ingredient-indent` for verify/issue), so no dead routes.
+
+**Untouched / frozen (verified):** NO money/wallet/GST/dues code touched or added. NO sub-recipe dispatch to local kitchens built (Head Chef territory). `applyStockCascade`, `expandItem`, `bomExpander`, the `brand_stocks` schema, the `purchase_register` schema + FEFO logic, and the projection-driven indent generation in `convertProjectionToProductionOrder` are all UNCHANGED. No B2B per-brand warehouse entity (one central warehouse, brand-tagged stock inside it).
+
+**Run-once after deploy:** `node backend/scripts/migrateStockUpdateIndex.js` (drops the legacy `stock_updates` unique index). Backfill: existing `itemmasters` thresholds stay null ("Not set" in UI); legacy `stock_updates` rows are unlocked legacy data — not retroactively locked.
+
+**Files involved:**
+- `backend/models/procurementLog.js` (new, incl. `VENDOR_ALERT_RESOLVED` event), `backend/models/deliveryQc.js` (new), `backend/models/itemMaster.js`, `backend/models/stockUpdate.js`, `backend/models/vendor.js`, `backend/models/creditNoteAlert.js` (read-only reuse for Vendor Alerts)
+- `backend/utils/procurementLog.js` (new), `backend/scripts/migrateStockUpdateIndex.js` (new)
+- `backend/controllers/stockManager.controller.js` (new; +Vendor Alerts get/resolve), `backend/routes/stockManager.routes.js` (new; +vendor-alerts routes), `backend/index.js` (mounts `/api/stock-manager`)
+- `backend/controllers/stockUpdate.controller.js` + `backend/controllers/poc.controller.js` (pinned to `correctionSeq:0`)
+- `frontend/src/pages/StockManager.jsx` (new; per-brand workspace + "Vendor Alerts" drawer item + top-level "All Audits" tab; client-dashboard color scheme, rounded pill nav with Skope logo + Logout, shared `Footer`, no emojis), `frontend/src/App.jsx` (+`/stock-manager` route), `frontend/src/pages/AdminDashboard.jsx` (bounce + BrandList gate + Ingredient-Admin views removed), `frontend/src/pages/AdminDashboard.legacy.jsx` (verbatim rollback copy, not routed — also the record-only home of the permanently-removed bulk price tool), `frontend/src/components/Navigation.jsx` + `frontend/src/pages/Login.jsx` (Stock Manager redirects)
+
+**Deferred (not built at §20 time; Head Chef + Local Kitchen now BUILT — see §21/§22):** Data Analyst dashboard, realized FCR, analyst engine; low-stock auto-indent assist; first-time-ingredient Out-of-Stock exception — per the build order.
+
+**Carry-forward / known correctness item (post-deployment cleanup, low priority):** The warehouse closing-stock audit reconcile (`reconcileAuditToLedger` in `stockManager.controller.js`) silently skips an ingredient when there are multiple `brand_stocks` rows for the same brand (e.g. the same ingredient stocked in WAREHOUSE_DRY + WAREHOUSE_CHILLER) — the Store Manager matcher filters on `{brandName, itemName}` only, with NO location filter, so any item held in >1 location hits the "`stockDocs.length > 1` → warn + continue" guard and never reconciles (the variance is recorded in the audit but never pushed to the ledger). The producer audits (Head Chef §21 / Local Kitchen §22, shared `producerAudit.js`) do NOT have this issue — they filter by `branchCode` + `location`, so they reliably land exactly one row. **Fix:** tighten the warehouse matcher to include `location` (and `branchCode`), OR surface the skip-warning visibly to the Store Manager when it fires (today it only goes to `console.warn`). Low-priority correctness item; track for post-deployment cleanup.
+
+## 21. Feature Log — Head Chef Dashboard (built, B2C)
+
+**What it is:** Dashboard #4 of 6 (2nd producer dashboard). A brand-first tool at `/head-chef` for the base-kitchen (JP Nagar) Head Chef. Code role: **RECIPE_MANAGER** (no new role). Owns recipe lifecycle, promote-to-final, bulk sub-recipe production planning, dispatch to local kitchens, indents + vendor alerts to the Stock Manager, SEMI_FINISHED stock audit, ingredient lists to the POC, and Rista POS reconciliation. NEVER touches money (frozen).
+
+**Coexistence (deliberate, founder-approved):** Built **ALONGSIDE** the legacy `AdminDashboard.jsx`, NOT as a migration. The legacy recipe-admin views (RecipesModal, TrialTrainingModal, GrnModal, MapIngredientsModal, etc.) are **untouched and still work**; `/head-chef` links to them via an "Open Recipe Editor" button.
+
+**Recipe editing — HONEST CURRENT STATE (no native editor inside `/head-chef` yet):** the Head Chef Recipes/Trials/Training drawer tabs are **navigation entry points, not embedded editors**. Specifically:
+- **"Add new ingredient to catalog"** — native form in `/head-chef` (`POST /api/head-chef/ingredient`). ✅ Also native: Promote-to-Final, Send-ingredient-list-to-POC, read-only FCR timeline.
+- **Recipe creation** — done on the existing standalone builder pages (`/add-recipe` [MAIN + SUB], `/add-trial-recipe`, `/add-training-recipe`), **linked** from the Head Chef tabs, NOT embedded in `HeadChef.jsx`.
+- **Recipe editing** (changing an existing main/sub/trial/training BOM) — currently has **no path inside `/head-chef`**; it uses the **AdminDashboard recipe modals** via the "Open Recipe Editor" link (the `/add-*` pages are create-oriented, no load-existing-by-id).
+- **A native recipe workspace inside `HeadChef.jsx` is a planned follow-up** — not yet built. The earlier wording here ("Recipe/Trial/Training CRUD is REUSED … no UI duplication") was true about *reuse* but wrongly implied the CRUD surface lives in the new dashboard; it does not.
+
+CRUD still routes to the existing RECIPE_MANAGER-gated APIs (`/api/mainrecipes`, `/api/subrecipes`, `/api/trial-recipes`, `/api/training-recipes`, `/api/ingredient-indent`) — no controller duplication.
+
+**EXPLICIT FOLLOW-UP (do NOT lose):** a **native recipe editor inside `/head-chef` is a PREREQUISITE** for removing the legacy recipe-admin views from `AdminDashboard.jsx`. Until that editor is built, the legacy `AdminDashboard` **remains the recipe-editing surface** and must NOT be removed. (`AdminDashboard.legacy.jsx` already exists as rollback for whenever that removal eventually happens.)
+
+**Final pricing decision:** Head Chef edits Final (MainRecipe) prices via the existing recipe-edit flow it owns (through the legacy editor). The POC's per-iteration price writer + confirmation gate (§18) was **NOT** touched.
+
+**New backend — `/api/head-chef` (controller `headChef.controller.js`, routes `headChef.routes.js`, all `requireRole("RECIPE_MANAGER")`):**
+- `GET /brands-summary` — per-brand tiles (main recipes, pending trials/training [count − confirmed], confirmed finals, pending indents, QC failures) + `clientId`.
+- `POST /ingredient` — adds an `itemmasters` row (shelfLife/minStock left null — Stock Manager owns those).
+- `POST /clients/:clientId/ingredient-list` `{phase,code,recipeName?}` — extracts a trial/training iteration's BOM (shared `extractIngredientsFromBOM`+`aggregateIngredients`) into a new **`ingredient_lists_to_poc`** record; 404 if recipe missing. → POC panel (§17 addition below). **Resolver:** when `recipeName` is provided it disambiguates by `brand + recipeName + code` (anchored case-insensitive); when omitted it falls back to the FIRST match by `brand + code` (legacy behavior). The Head Chef UI sends `recipeName` via a required dish dropdown — earlier wording here implied `recipeName` was always part of resolution, which it was not until the dropdown fix.
+- `POST /promote-to-final` `{brandName,recipeName,sourceCode:TR1|TR2|TR3}` — copies the training BOM into MainRecipe (update if exists, else create). `getDishIterations` then surfaces the Final tile automatically — no change to the FCR engine.
+- `GET /production-plan?brandName=&date=` — read-only; explodes CHEF_CONFIRMED projections' MainRecipe BOMs into required sub-recipe qty with per-kitchen breakdown.
+- `POST /dispatch` — validates SEMI_FINISHED availability, **atomically** (mongoose session) debits `brand_stocks` SEMI_FINISHED@JPNAGAR (TRANSFER_OUT) + creates a **`subrecipe_dispatches`** `DISPATCHED` row (destination credited on receipt, QC-style). Can fulfil a Local-Kitchen `REQUESTED` row. `GET /dispatches`, `/dispatches/discrepancies`, `/requests`.
+- `GET /indents` (brand-scoped, with source + warehouseStockAvailable), `POST /indents/custom` (mirrors `createIndent` doc shape; Stock Manager's verify/issue handle it unchanged).
+- `GET /qc-failures` (reads `delivery_qc` SHORT/REJECTED), `POST /vendor-alerts` + `GET /vendor-alerts` (raises/lists `credit_note_alerts`, `createdByRole:"RECIPE_MANAGER"` — Stock Manager resolves).
+- `GET/POST /audit/:brandName` + `PATCH /audit/:brandName/lock` — **SEMI_FINISHED audit** (see "Audit storage" below).
+- `GET /reorder-insights` (projection-aware shortfall vs on-hand; one-click → custom indent).
+- `GET /rista-stock-comparison?brandName=&branchCode=` — **FUTURE-HOOK**; `ristaClient.getInventory` (JPNAGAR→BEN, MARATHAHALLI→MAR) joined vs Purchase Register; **graceful `{configured:false,rows:[]}` when Rista isn't wired** — never errors.
+- `GET /fcr/:brandName` (reuses `getDishIterations`), `GET /menu/:brandName` + `GET /projections/:brandName` (read-only).
+
+**Audit storage — DEVIATION FROM PLAN (data-safety, flagged):** the plan said reuse `stock_updates` for the Head Chef SEMI_FINISHED audit. During build I found `stock_updates`' unique key `{brandId,date,correctionSeq}` is NOT branch/scope-aware and the client's brand-wide "Daily Stock" view + the Stock Manager's warehouse audit already own those rows — so a same-brand/same-day producer audit would (a) duplicate-key error and (b) corrupt client Daily Stock. **Fix:** a dedicated additive **`producer_audits`** collection keyed `{brandId,branchCode,scope,date,correctionSeq}` (scope = `BASE_SEMI_FINISHED` | `LOCAL`), reusing the proven lock + correctionSeq-stacking + reconcile-to-`brand_stocks` PATTERN via shared `backend/utils/producerAudit.js`. Reconcile is scoped to the audit's specific location+branchCode (SEMI_FINISHED@JPNAGAR for Head Chef). `stock_updates` schema untouched.
+
+**procurement_logs emitting paths (the analyst stream):** ingredient-list→`INGREDIENT_LIST_SENT_TO_POC`; promote→`RECIPE_PROMOTED`; dispatch→`SUBRECIPE_DISPATCHED`; vendor alert→`VENDOR_ALERT_RAISED`; base audit lock/correction→`BASE_KITCHEN_AUDIT_LOCKED`+`VARIANCE_RECORDED`. (Reads — brands-summary, production-plan, indents list, qc-failures, reorder, rista, fcr, menu/projections — emit nothing, by design.)
+
+**POC addition (small, additive — NOT a redesign):** `GET /api/poc/clients/:clientId/ingredient-lists?status=PENDING` + `PATCH .../ingredient-lists/:listId/acknowledge`; an "Ingredient lists from kitchen" panel was spliced into `PocDashboard.jsx`'s existing `ProcurementView`. No other POC change.
+
+**Routing-gap fix:** `Login.jsx` + `Navigation.jsx` send RECIPE_MANAGER → `/head-chef` (and LOCAL_KITCHEN → `/local-kitchen`). `AdminDashboard.jsx` keeps RECIPE_MANAGER fully functional (coexistence) and adds only a defensive LOCAL_KITCHEN bounce + BrandList mount-gate. Fresh RECIPE_MANAGER login lands on `/head-chef` with no admin flash / no 403.
+
+**Files:** new `backend/controllers/headChef.controller.js`, `backend/routes/headChef.routes.js`, `backend/models/subrecipeDispatch.js`, `backend/models/ingredientListToPoc.js`, `backend/models/producerAudit.js`, `backend/utils/producerAudit.js`; edited `backend/models/procurementLog.js` (+8 event types), `backend/index.js` (mounts `/api/head-chef`), `backend/controllers/poc.controller.js` + `backend/routes/poc.routes.js` (+ingredient-list read/ack); new `frontend/src/pages/HeadChef.jsx`; edited `frontend/src/App.jsx`, `frontend/src/pages/Login.jsx`, `frontend/src/components/Navigation.jsx`, `frontend/src/pages/AdminDashboard.jsx`, `frontend/src/pages/PocDashboard.jsx`.
+
+## 22. Feature Log — Local Kitchen Dashboard (built, B2C)
+
+**What it is:** Dashboard #5 of 6 (3rd producer dashboard). A branch-scoped tool at `/local-kitchen` for the normal/local kitchens. New role **`LOCAL_KITCHEN`** (added to `AdminUser.role` enum + `authMiddleware`'s `ADMIN_ROLES` set). **One login per kitchen** — seeded from numbered `ADMIN_LOCALKITCHEN_<n>_*` env blocks (username/password/branchCode) in `seedAdminUsers.js`; each account's `branchCode` (on the JWT, already plumbed) scopes EVERY view to that kitchen. Receives dispatched sub-recipes, does final assembly, audits its own stock, requests replenishment. NEVER touches money (frozen).
+
+**Endpoints (`/api/local-kitchen`, controller `localKitchen.controller.js`, routes `localKitchen.routes.js`, all `requireRole("LOCAL_KITCHEN")`, branch-scoped from `req.user.branchCode`):**
+- `GET /brands` — brands whose `assignedBranches` includes this kitchen.
+- `GET /dispatches` (`toBranchCode===this kitchen`), `PATCH /dispatches/:id/acknowledge` `{status,discrepancyNote?}` — RECEIVED atomically credits BRANCH_KITCHEN@kitchen (TRANSFER_IN, upsert) + emits `SUBRECIPE_RECEIVED`; DISCREPANCY saves note, no credit (surfaces in Head Chef's discrepancies view).
+- `GET /stock/:brandName` — `brand_stocks` at this kitchen, by location.
+- `GET/POST /audit/:brandName` + `PATCH /audit/:brandName/lock` — LOCAL-scope `producer_audits` (same shared machinery as §21; reconciles to BRANCH_KITCHEN+SEMI_FINISHED@kitchen). Emits `LOCAL_KITCHEN_AUDIT_LOCKED`+`VARIANCE_RECORDED`.
+- `POST /indent` `{brandName,requestType,items[]}` — `RAW_INGREDIENT` → an `INVENTORY_TRANSFER` `ingredient_indents` row routed to the Stock Manager (reuses existing indent shape, no schema change); `SUB_RECIPE` → a `subrecipe_dispatches` `REQUESTED` row for the Head Chef. Emits `LOCAL_KITCHEN_INDENT_RAISED`. `GET /indents` lists both.
+- `GET /recipes/:brandName`, `/menu/:brandName`, `/projections/:brandName`, `/fcr/:brandName` — read-only (menu/projections branch-scoped; recipes/fcr brand-wide).
+
+**Every brand-scoped handler validates the brand is assigned to this kitchen (403 otherwise) — no cross-kitchen or cross-brand bleed.**
+
+**Files:** new `backend/controllers/localKitchen.controller.js`, `backend/routes/localKitchen.routes.js`, `frontend/src/pages/LocalKitchen.jsx`; edited `backend/models/adminUser.js` (+LOCAL_KITCHEN), `backend/middleware/auth.js` (+LOCAL_KITCHEN in ADMIN_ROLES), `backend/scripts/seedAdminUsers.js` (+LOCALKITCHEN loop), `backend/index.js` (mounts `/api/local-kitchen`), `frontend/src/App.jsx`. Shares `subrecipe_dispatches`, `producer_audits`, `procurementLog`, `producerAudit.js`, and `emitAuditLogs` (exported from `headChef.controller.js`) with §21.
+
+**Run-once after deploy:** add the `.env` keys below and run `node backend/scripts/seedAdminUsers.js` once (idempotent upsert; same pattern as the POC account) so the three Local Kitchen logins exist:
+```
+ADMIN_LOCALKITCHEN_1_USERNAME=...        ADMIN_LOCALKITCHEN_1_PASSWORD=...   ADMIN_LOCALKITCHEN_1_BRANCH_CODE=MARATHAHALLI
+ADMIN_LOCALKITCHEN_2_USERNAME=...        ADMIN_LOCALKITCHEN_2_PASSWORD=...   ADMIN_LOCALKITCHEN_2_BRANCH_CODE=KALYANNAGAR
+ADMIN_LOCALKITCHEN_3_USERNAME=...        ADMIN_LOCALKITCHEN_3_PASSWORD=...   ADMIN_LOCALKITCHEN_3_BRANCH_CODE=JPNAGAR_KITCHEN
+```
+
+**Deferred (not built):** Data Analyst dashboard (#6), realized FCR, analyst engine — per the build order.
+
+## 23. Feature Log — Client Audit Visibility + Store Manager Stock % Indicators (built)
+
+Two contained, additive UI/read features on the **Client** and **Store Manager** dashboards. No schema changes, no logic changes to existing flows.
+
+### Feature 1 — Client "Audit History" view (NEW, LIVE-gated)
+A new drawer item **"Audit History"** on the Client Dashboard, separate from and additive to the existing **Daily Stock** view (which is **UNCHANGED** — same `GET /api/client/daily-stock`, same `getDailyStock`, same UI, still serving the IN_TRIAL workflow). Audit History is **read-only** and **gated on `lifecycleStage === "LIVE"`** on BOTH frontend (drawer shows a "Locked" badge + `LockedNotice`, same pattern as projections/analytics) and backend (403).
+
+Three read sources, **locked audits only** (`lockedAt != null`):
+- **Warehouse Audits** (brand-wide) — `stock_updates` docs written by the Store Manager closing-stock lock/correction. Reads the doc's `variances[]` (expected/actual/variance/reason/reasonNote). POC/legacy daily-stock rows never set `lockedAt`, so this filter cleanly excludes them.
+- **Local Kitchen Audits** (PER BRANCH) — `producer_audits` `scope: "LOCAL"`, grouped by `branchCode`. Every assigned branch surfaces (empty `audits[]` → per-branch "No audits yet for {branch}" empty state). Optional `branchCode` filter validated against `assignedBranches` (403 otherwise).
+- **Base Kitchen Audits** — `producer_audits` `scope: "BASE_SEMI_FINISHED"` (Head Chef SEMI_FINISHED @ JP Nagar).
+
+**Top-level welcome empty-state:** when ALL three sections are empty simultaneously (common right after go-live), a single "No audit history yet…" message replaces the three stacked empty cards. Once any audit appears anywhere, the normal three-section layout renders.
+
+**`producer_audits` is now a CLIENT read source** (previously internal/producer-only). Access is **read-only** — the schema is untouched.
+
+New endpoints in `client.controller.js` (+ `client.routes.js`), all `requireLiveClient` (403 line refs: `getWarehouseAudits`, `getLocalKitchenAudits`, `getBaseKitchenAudits` each call shared `requireLiveClient`, which writes the 403):
+- `GET /api/client/audits/warehouse?from=&to=`
+- `GET /api/client/audits/local-kitchen?from=&to=&branchCode=`
+- `GET /api/client/audits/base-kitchen?from=&to=`
+Date range defaults to last 7 days. Every endpoint filters strictly by `brandId === req.user._id` — no cross-brand leak; branch filter validated against `assignedBranches`.
+
+### Feature 2 — Store Manager stock % indicators (frontend-only)
+A reusable `<StockPercentBar currentQty minStockLevel />` (in `StockManager.jsx`) added to BOTH **Reorder Insights** (uses `currentQty`) and **Stock Overview** (uses item-level `itemTotalRemaining`). Both endpoints already returned `currentQty`/`itemTotalRemaining` + `minStockLevel` — **no backend change**. Colored bar: **red `< 25%`, amber `25–75%`, green `> 75%`**, capped at 100% with an "Above min" label above the minimum; "Threshold not set" when `minStockLevel` is null (set inline via the existing Thresholds editor → `PATCH /api/stock-manager/ingredient/:itemName`).
+
+### Emoji sweep (UI-only)
+Per the no-emoji convention used by POC/Stock Manager/Head Chef/Local Kitchen, ALL pictographic emojis were removed from `Dashboard.jsx`: drawer item icons (now plain text labels, first letter when collapsed — POC convention), Home button, the 🔒 lock indicator (drawer badge → "Locked" text; `LockedNotice` decorative circle removed), ⚠️ on the pending-due banner, ➕/➖ on wallet transaction rows, and the 🍽️ profile placeholder (→ brand initial, matching the other dashboards' avatar convention). The shared `✕` remove/close glyph is retained (same convention as the other four dashboards). Copy, UX, and logic otherwise unchanged.
+
+**Files involved:**
+- `backend/controllers/client.controller.js` (+`ProducerAudit` import; +`requireLiveClient`/`parseAuditRange`/`mapVarianceRow` helpers; +3 audit handlers), `backend/routes/client.routes.js` (+3 routes)
+- `frontend/src/pages/Dashboard.jsx` (+`AuditHistoryView`/`AuditCard`/`AuditItemsTable`; drawer item + render branch; full emoji sweep), `frontend/src/pages/StockManager.jsx` (+`StockPercentBar` + one column in Reorder Insights and Stock Overview)
+
+**Untouched / verified:** existing Daily Stock view + endpoint; `stock_updates` & `producer_audits` schemas (read-only); authMiddleware, applyStockCascade, bomExpander, brand_stocks/purchase_register/recipe schemas, wallet/payment/GST, signup, nav, footer; POC / Head Chef / Local Kitchen dashboards.
+
+## 24. Feature Log — Wallet-Free Invoice & GRN Flow (Razorpay-Direct + Email + Supplementary Invoices) (built)
+
+**What it is:** A system-wide invoicing/payment redesign across the **Client**, **POC**, and **Stock Manager** dashboards. The wallet flow is **deprecated** — every invoice (ONBOARDING / PROCUREMENT / SUBSCRIPTION / PRODUCTION / **REIMBURSEMENT**) is now paid **directly via Razorpay** (per-invoice order + signature verify), confirmation emails fire on raise + payment, attachments upload to Cloudinary, and procurement supports **supplementary invoices** with a **GRN client-visibility gate**.
+
+**WALLET IS FROZEN — not deleted, not called by any new path.**
+- `wallet.routes.js`, `wallet.controller.js`, `WalletPanel.jsx` — **unmodified**. The admin wallet panel still works for legacy/rollback.
+- `User.wallet.balance` / `User.wallet.dueAmount` fields remain (legacy/rollback) but are **never read or written** by any new flow.
+- The client dashboard no longer renders wallet ANYWHERE (header balance, "Wallet & Transactions" drawer item, Pay-Due banner, wallet/transactions modals, `WalletView` — all removed; `loadWallet`/`startRecharge`/`payDue` deleted; no `GET /api/wallet` calls remain). The Razorpay `<script>` (index.html) stays — now used for per-invoice checkout.
+
+**Schema changes (all additive — existing records read as defaults, NO migration):**
+- `User.invoices[]`: `type` enum +`REIMBURSEMENT`; +`commission`(0), `notes`(""), `attachmentUrl`(null), `attachmentName`(null), `razorpayOrderId`, `razorpayPaymentId`, `paidAt`, `paidVia` enum `["RAZORPAY","WALLET_LEGACY"]` (new payments ALWAYS write `RAZORPAY`; `WALLET_LEGACY` is for historical records only, never written by new code), `parentInvoiceId` (supplementary→parent), `supplementaryReason`, `indentId` (links a procurement invoice to its source indent so a GRN can find it).
+- `delivery_qc` (= the GRN): +`grnGroupId` (one GRN submission = one logical GRN across its item rows), +`linkedInvoiceIds[]`, +`receivedQtyEntered` (bool), +`clientVisibleAt` (date). The client GRN view filters on `clientVisibleAt != null`.
+- `ProductionOrder.financials`: +`razorpayOrderId`, `razorpayPaymentId`, `paidVia` (RAZORPAY only for new payments).
+- `procurement_logs` enum: +`PROCUREMENT_INVOICE_RAISED`, +`GRN_RECEIVED_UPDATED`.
+
+**Supplementary invoice + GRN client-visibility mechanism (Option A — grouped delivery_qc):**
+- Stock Manager raises a PROCUREMENT invoice from an indent (`indentId` stored on the invoice). Later they can raise a **supplementary** invoice (`parentInvoiceId` + required `supplementaryReason`) — parent must exist and belong to the SAME client.
+- When the GRN is created (`postGrn`), it generates a `grnGroupId` and looks up every invoice on that client carrying the same `indentId` (parent + supplementaries) → sets `linkedInvoiceIds` on each delivery_qc row.
+- A GRN becomes client-visible ONLY when **every linked invoice is PAID AND `receivedQtyEntered === true`**. This is computed by the shared `backend/utils/grnVisibility.js` (`recomputeGrnVisibilityByGroup` / `recomputeGrnVisibilityForInvoice`), called from BOTH the payment-verify path (client) and the GRN update-received path (Stock Manager). **Race-safe:** the visibility stamp is set via an atomic `updateMany` guarded on `{ clientVisibleAt: null }`, so whichever path fires second is a harmless no-op (no "first wins / second errors"; stamped exactly once).
+
+**Email (SendGrid) — `backend/services/email.service.js` (new):** generic `sendEmail({to,subject,html,attachments})` via SendGrid v3 content API + `invoiceRaisedEmailHtml`/`invoicePaidEmailHtml` builders. **Graceful:** no-ops + warns if `SENDGRID_API_KEY`/`EMAIL_FROM` unset; NEVER throws/blocks. Triggers: on raise → email client; on payment → email the raiser (Store Manager for PROCUREMENT via `PROCUREMENT_NOTIFY_EMAIL`, POC otherwise via `POC_NOTIFY_EMAIL`). **Both env keys OPTIONAL** — if unset the raiser email silently no-ops; the invoice still flips PAID. All email is fire-and-forget (`.catch(()=>{})`).
+
+**Cloudinary attachments:** `backend/middleware/uploadInvoiceAttachment.js` (new, multer memory, PDF/DOC/DOCX only, 10MB) + `backend/utils/cloudinaryUpload.js` (new, `uploadInvoiceBuffer` → `folder:"invoices"`, `resource_type:"raw"`; `isValidCloudinaryUrl` guard so arbitrary URLs are rejected before storing). Reuses the existing `config/cloudinary.js`. Upload endpoints: `POST /api/poc/clients/:clientId/invoice-attachment` and `POST /api/stock-manager/invoice-attachment`.
+
+**Razorpay shared helper:** `backend/utils/razorpay.js` (new) — single `createInvoiceOrder()` + `verifyRazorpaySignature()` (HMAC-SHA256 `order_id|payment_id`, constant-time compare). Same credentials as the frozen wallet flow. Every payment path verifies a signature — no invoice flips to PAID without it.
+
+**Endpoints:**
+- POC: `POST /clients/:id/invoice` (now creates a Razorpay order + new fields + emails client), `POST /clients/:id/invoice-attachment`, `GET /clients/:id/invoices` (extended fields).
+- Stock Manager: `POST /invoice` (procurement, parent or supplementary, Razorpay order, emits `PROCUREMENT_INVOICE_RAISED`, emails client), `POST /invoice-attachment`, `PATCH /grn/:grnId/update-received` (sets received qty/price + `receivedQtyEntered`, recomputes visibility, emits `GRN_RECEIVED_UPDATED`), `GET /invoices` (raised procurement invoices, supplementaries grouped under parents). `postGrn` extended to set `grnGroupId`/`linkedInvoiceIds`/`receivedQtyEntered` + recompute visibility.
+- Client: `POST /invoices/:invoiceId/pay-direct` (returns stored razorpayOrderId + amount/commission), `POST /invoices/:invoiceId/verify-payment` (verify sig → PAID/paidVia RAZORPAY, recompute GRN visibility, email raiser), `GET /grns` (visible GRNs grouped, brand-scoped, no LIVE gate). The old wallet `payInvoice` route/handler is replaced.
+- Production order: `POST /:id/create-order` (new — Razorpay order for the cost) + `POST /:id/pay` (REWIRED — now verifies signature; the OLD wallet-deduction path is **fully replaced**, `paidVia` always RAZORPAY).
+
+**Frontend:** POC `InvoicingView` redesigned (invoice-style form: type incl. REIMBURSEMENT, commission, notes, attachment upload, price-confirmation guardrail; list shows commission/total/attachment/paidAt). Stock Manager new **"Procurement Invoices"** drawer item (`ProcurementInvoicesView` + `ProcInvoiceForm`: raise from indent, raise supplementary on PAID parents, grouped list, Paid badges). Client `Dashboard.jsx`: wallet fully removed; `InvoicesView` rewritten to pay via Razorpay (pay-direct→checkout→verify), shows commission/total/attachment, grouped supplementaries, "View GRN"; new **"Goods Received Notes"** drawer item (`GrnView`); production banner rewired to Razorpay (create-order→checkout→pay/verify).
+
+**Run-once after deploy (optional env):** `PROCUREMENT_NOTIFY_EMAIL`, `POC_NOTIFY_EMAIL` (raiser-notification recipients — unset = silent no-op). Existing `SENDGRID_API_KEY`/`EMAIL_FROM`/`CLOUDINARY_*`/`RAZORPAY_*` already present. No data migration (additive schema; test client wallet empty).
+
+**Files:** new `backend/services/email.service.js`, `backend/middleware/uploadInvoiceAttachment.js`, `backend/utils/cloudinaryUpload.js`, `backend/utils/razorpay.js`, `backend/utils/grnVisibility.js`; edited `backend/models/user.js`, `deliveryQc.js`, `productionOrder.js`, `procurementLog.js`, `backend/controllers/poc.controller.js` + `routes/poc.routes.js`, `controllers/stockManager.controller.js` + `routes/stockManager.routes.js`, `controllers/client.controller.js` + `routes/client.routes.js`, `controllers/productionOrder.controller.js` + `routes/productionOrder.routes.js`; edited `frontend/src/pages/Dashboard.jsx`, `PocDashboard.jsx`, `StockManager.jsx`.
+
+**Untouched / frozen (verified):** `wallet.routes.js`, `wallet.controller.js`, `WalletPanel.jsx` (NONE modified); `authMiddleware`, `applyStockCascade`, `bomExpander`, `expandItem`, `brand_stocks`/`purchase_register` schemas + FEFO, recipe schemas, signup, nav, footer; Head Chef + Local Kitchen dashboards.
 
 ## graphify
 

@@ -60,6 +60,21 @@ const vendorSchema = new mongoose.Schema(
 
     phoneNumber: { type: String, default: "", trim: true, index: true },
     phoneVerified: { type: Boolean, default: false },
+
+    // ── Stock Manager vendor management (additive) ────────────────────────────
+    // Vendors are global (not brand-owned); purchases against them are brand-tagged.
+    status: {
+      type: String,
+      enum: ["ACTIVE", "INACTIVE"],
+      default: "ACTIVE",
+      index: true,
+    },
+    notes: { type: String, default: "", trim: true },
+    // AdminUser._id of the Stock Manager who created this vendor record.
+    createdBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // Updated on every GRN so the Stock Manager can spot dormant vendors.
+    lastDeliveryAt: { type: Date, default: null },
+    // ──────────────────────────────────────────────────────────────────────────
   },
   { timestamps: true }
 );

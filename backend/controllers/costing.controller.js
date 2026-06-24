@@ -197,7 +197,7 @@ const escapeRegex = (text) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 
-const calculateCost = ({ quantity, netPrice, uom }) => {
+export const calculateCost = ({ quantity, netPrice, uom }) => {
   const qty = Number(quantity || 0);
   const price = Number(netPrice || 0);
 
@@ -210,7 +210,7 @@ const calculateCost = ({ quantity, netPrice, uom }) => {
   return qty * price;
 };
 
-async function resolveSubRecipe({ recipeName, brandName, cache }) {
+export async function resolveSubRecipe({ recipeName, brandName, cache }) {
   const key = String(recipeName || "").trim().toLowerCase();
   if (!key) return null;
   if (cache.has(key)) return cache.get(key);
@@ -221,7 +221,7 @@ async function resolveSubRecipe({ recipeName, brandName, cache }) {
   return match;
 }
 
-async function sumSubRecipeCost({ items, brandName, multiplier, subRecipeCache, visitedSubRecipes }) {
+export async function sumSubRecipeCost({ items, brandName, multiplier, subRecipeCache, visitedSubRecipes }) {
   let sum = 0;
   for (const it of items || []) {
     if (it.type === "SUBRECIPE") {
@@ -256,20 +256,18 @@ async function sumSubRecipeCost({ items, brandName, multiplier, subRecipeCache, 
 
 /* ================= SUMMARY ================= */
 
-export const getSummary = async (req, res) => {
-  const userBrandName = req.user?.brandName;
-  if (!userBrandName) {
-    return res.status(403).json({ message: "Brand not linked to this account" });
-  }
+// Brand-scoped FCR summary, reusable outside the HTTP layer (e.g. the client
+// dashboard). Returns the same rows getSummary serves, for a given brand name.
+export async function computeBrandFcrSummary(brandName) {
+  if (!brandName) return [];
 
   const allRecipes = await MainRecipe.find({}, "recipeName brand").lean();
-  const recipes = allRecipes.filter(r => brandsMatch(userBrandName, r.brand));
+  const recipes = allRecipes.filter(r => brandsMatch(brandName, r.brand));
 
   const summary = [];
-
   for (const recipe of recipes) {
     const result = await calculateRecipe(recipe._id);
-
+    if (!result) continue;
     summary.push({
       dishName: recipe.recipeName,
       brand: recipe.brand,
@@ -280,25 +278,34 @@ export const getSummary = async (req, res) => {
       suggestedSellingPrice: result.suggestedSellingPrice,
     });
   }
+  return summary;
+}
 
+export const getSummary = async (req, res) => {
+  const userBrandName = req.user?.brandName;
+  if (!userBrandName) {
+    return res.status(403).json({ message: "Brand not linked to this account" });
+  }
+
+  const summary = await computeBrandFcrSummary(userBrandName);
   res.json({ summary });
 };
 
-async function calculateRecipe(recipeId) {
-  const mainRecipe = await MainRecipe.findById(recipeId);
-  if (!mainRecipe) return null;
-
+// Reusable cost-computation core: takes any recipe-shaped items[] + brand,
+// independent of which Mongoose model the document came from (MainRecipe,
+// TrialRecipe, TrainingRecipe all share the same item sub-schema shape).
+export async function calculateRecipeFromItems(items, brand) {
   let breakdown = [];
   const subRecipeCache = new Map();
   const visitedSubRecipes = new Set();
 
-  for (const item of mainRecipe.items) {
+  for (const item of items || []) {
     await expandItem({
       item,
       multiplier: 1,
       level: 0,
       breakdown,
-      brandName: mainRecipe.brand,
+      brandName: brand,
       subRecipeCache,
       visitedSubRecipes,
     });
@@ -323,6 +330,12 @@ async function calculateRecipe(recipeId) {
     total: round(total),
     suggestedSellingPrice: round(total / 0.32),
   };
+}
+
+async function calculateRecipe(recipeId) {
+  const mainRecipe = await MainRecipe.findById(recipeId);
+  if (!mainRecipe) return null;
+  return calculateRecipeFromItems(mainRecipe.items, mainRecipe.brand);
 }
 
 const round = (n) => Number(n.toFixed(2));

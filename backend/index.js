@@ -43,6 +43,11 @@ import stockUpdateRoutes from "./routes/stockUpdate.routes.js";
 import fridgeAuditRoutes from "./routes/fridgeAudit.routes.js";
 import projectionRoutes from "./routes/projection.routes.js";
 import productionOrderRoutes from "./routes/productionOrder.routes.js";
+import clientRoutes from "./routes/client.routes.js";
+import pocRoutes from "./routes/poc.routes.js";
+import stockManagerRoutes from "./routes/stockManager.routes.js";
+import headChefRoutes from "./routes/headChef.routes.js";
+import localKitchenRoutes from "./routes/localKitchen.routes.js";
 
 dotenv.config()
 validateEnv();
@@ -134,6 +139,11 @@ app.use("/api", fridgeAuditRoutes);
 app.use("/api/google", googleRoutes);
 app.use("/api/projections", projectionRoutes);
 app.use("/api/production-orders", productionOrderRoutes);
+app.use("/api/client", clientRoutes);
+app.use("/api/poc", pocRoutes);
+app.use("/api/stock-manager", stockManagerRoutes);
+app.use("/api/head-chef", headChefRoutes);
+app.use("/api/local-kitchen", localKitchenRoutes);
 
 // WALLET_MANAGER only — will become SUPER_ADMIN when that role is introduced.
 app.get("/debug/db", authMiddleware, requireRole("WALLET_MANAGER"), async (req, res) => {

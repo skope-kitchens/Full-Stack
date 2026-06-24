@@ -15,11 +15,17 @@ const AdminDashboard = () => {
   const [showMapIngredientsModal, setShowMapIngredientsModal] = useState(false);
   const [showGrnModal, setShowGrnModal] = useState(false);
   const [showTrialTrainingModal, setShowTrialTrainingModal] = useState(false);
-  // Ingredient-Manager modal state was removed — those views live at /stock-manager.
+  const [showIngredientsModal, setShowIngredientsModal] = useState(false);
+  const [showInventoryModal, setShowInventoryModal] = useState(false);
+  const [showIngredientInventoryModal, setShowIngredientInventoryModal] = useState(false);
+  const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showRecipeInventoryModal, setShowRecipeInventoryModal] = useState(false);
   const [notifCounts, setNotifCounts] = useState(null);
   const [showFcrModal, setShowFcrModal] = useState(false);
+  const [showCheckStockModal, setShowCheckStockModal] = useState(false);
+  const [showStockUpdateModal, setShowStockUpdateModal] = useState(false);
+  const [showPurchaseRegisterModal, setShowPurchaseRegisterModal] = useState(false);
   const navigate = useNavigate();
   const search = typeof window !== "undefined" ? window.location.search : "";
 
@@ -41,25 +47,10 @@ const AdminDashboard = () => {
   // Bounce them there so they never sit on this page (which would otherwise
   // fire admin-only calls like GET /api/admin/brands → 403).
   const isPoc = adminRole === "POC";
-  // LOCAL_KITCHEN has its own dashboard at /local-kitchen and no business on this
-  // page. Defensive bounce (same reasoning as POC) — it should never land here.
-  const isLocalKitchen = adminRole === "LOCAL_KITCHEN";
 
   useEffect(() => {
     if (isPoc) navigate("/poc");
   }, [isPoc, navigate]);
-
-  useEffect(() => {
-    if (isLocalKitchen) navigate("/local-kitchen");
-  }, [isLocalKitchen, navigate]);
-
-  // INGREDIENT_MANAGER is now the Stock Manager — it has its own dashboard at
-  // /stock-manager (the Ingredient-Admin views were migrated there). Bounce them
-  // so they never sit on this page. The BrandList mount is also gated below so the
-  // admin-only GET /api/admin/brands never fires during the redirect frame.
-  useEffect(() => {
-    if (isIngredientManager) navigate("/stock-manager");
-  }, [isIngredientManager, navigate]);
 
   const branchCode = authUtils.getBranchCode();
   const warehouseId = authUtils.getWarehouseId();
@@ -84,10 +75,8 @@ const AdminDashboard = () => {
       .join(" ");
   };
 
-  // INGREDIENT_MANAGER's menu + brand views were migrated to /stock-manager and
-  // that role is bounced above, so it no longer drives any UI on this page.
-  const hasMenuOptions = isRecipeManager;
-  const canManageBrand = isWalletManager || isRecipeManager;
+  const hasMenuOptions = isRecipeManager || isIngredientManager;
+  const canManageBrand = isWalletManager || isRecipeManager || isIngredientManager;
 
   useEffect(() => {
     if (!isRecipeManager && !isIngredientManager) return;
@@ -245,8 +234,95 @@ const AdminDashboard = () => {
                         </button>
                       </>
                     )}
-                    {/* INGREDIENT_MANAGER (Stock Manager) menu items were migrated
-                        to /stock-manager. This menu is now Recipe-Manager only. */}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowIngredientsModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Update Ingredients
+                      </button>
+                    )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowIngredientInventoryModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        <span className="flex items-center justify-between">
+                          <span>Inventory</span>
+                          {Number(notifCounts?.indent || 0) > 0 && (
+                            <span className="h-2 w-2 rounded-full bg-red-500" />
+                          )}
+                        </span>
+                      </button>
+                    )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowCreditNoteModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Credit Note
+                      </button>
+                    )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowInventoryModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Stock (Rista)
+                      </button>
+                    )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowCheckStockModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Check Stock
+                      </button>
+                    )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowStockUpdateModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Stock Update
+                      </button>
+                    )}
+                    {isIngredientManager && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMenu(false);
+                          setShowPurchaseRegisterModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                      >
+                        Purchase Register
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -290,12 +366,11 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Brand list visible to admin roles EXCEPT POC and INGREDIENT_MANAGER —
-            both have their own dashboards (/poc, /stock-manager) and the Stock
-            Manager's brand views were migrated there. Gating the mount — not just
-            redirecting — prevents GET /api/admin/brands from firing during the
-            redirect frame. */}
-        {!isPoc && !isIngredientManager && !isLocalKitchen && (
+        {/* Brand list visible to all admin roles EXCEPT POC (POC has no admin
+            access and would 403 on GET /api/admin/brands). Gating the mount —
+            not just redirecting — prevents the forbidden call from ever firing
+            during the redirect frame. */}
+        {!isPoc && (
           <BrandList
             key={refreshKey}
             onSelectBrand={canManageBrand ? setSelectedBrand : undefined}
@@ -324,8 +399,27 @@ const AdminDashboard = () => {
           <MapIngredientsModal onClose={() => setShowMapIngredientsModal(false)} />
         )}
 
-        {/* Ingredient-Manager modals (Update Ingredients, Stock/Rista, Inventory
-            Indent/Issue, Credit Note) were migrated to /stock-manager. */}
+        {/* Ingredient update modal only for ingredient managers */}
+        {isIngredientManager && showIngredientsModal && (
+          <IngredientsModal onClose={() => setShowIngredientsModal(false)} />
+        )}
+
+        {/* Inventory modal only for ingredient managers */}
+        {isIngredientManager && showInventoryModal && (
+          <InventoryModal onClose={() => setShowInventoryModal(false)} />
+        )}
+
+        {/* Ingredient inventory (Indent/Issue) */}
+        {isIngredientManager && showIngredientInventoryModal && (
+          <IngredientInventoryModal
+            onClose={() => setShowIngredientInventoryModal(false)}
+          />
+        )}
+
+        {/* Credit Note alerts for ingredient manager */}
+        {isIngredientManager && showCreditNoteModal && (
+          <CreditNoteModal onClose={() => setShowCreditNoteModal(false)} />
+        )}
 
         {/* Recipe admin inventory */}
         {isRecipeManager && showRecipeInventoryModal && (
@@ -334,8 +428,20 @@ const AdminDashboard = () => {
           />
         )}
 
-        {/* Check Stock / Stock Update / Purchase Register modals were migrated to
-            /stock-manager. */}
+        {/* Check Stock modal for ingredient manager */}
+        {isIngredientManager && showCheckStockModal && (
+          <CheckStockModal onClose={() => setShowCheckStockModal(false)} />
+        )}
+
+        {/* Stock Update modal for ingredient manager */}
+        {isIngredientManager && showStockUpdateModal && (
+          <StockUpdateModal onClose={() => setShowStockUpdateModal(false)} />
+        )}
+
+        {/* Purchase Register modal for ingredient manager */}
+        {isIngredientManager && showPurchaseRegisterModal && (
+          <PurchaseRegisterModal onClose={() => setShowPurchaseRegisterModal(false)} />
+        )}
 
         {/* FCR breakdown modal */}
         {isRecipeManager && showFcrModal && (
@@ -358,6 +464,329 @@ const AdminDashboard = () => {
   );
 };
 
+/* ---------- INVENTORY MODAL ---------- */
+function InventoryModal({ onClose }) {
+  const [branchCode, setBranchCode] = useState("AMSJ");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const fetchInventory = async (code) => {
+    if (!code) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/api/inventory/items", {
+        params: { branchCode: code },
+      });
+      setItems(res.data?.data || []);
+    } catch (err) {
+      setError(
+        err.response?.data?.message || "Failed to fetch inventory items"
+      );
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInventory(branchCode);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Inventory</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-black text-2xl"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-6 border-b flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Branch Code
+            </label>
+            <input
+              type="text"
+              value={branchCode}
+              onChange={(e) => setBranchCode(e.target.value.toUpperCase())}
+              className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              placeholder="e.g. AMSJ"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchInventory(branchCode)}
+            disabled={loading}
+            className="inline-flex items-center px-4 py-2 rounded-lg bg-black text-white text-sm hover:bg-gray-800 disabled:opacity-50"
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-6">
+          {error && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div className="border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">SKU</th>
+                    <th className="px-3 py-2 text-left">Name</th>
+                    <th className="px-3 py-2 text-left">Category</th>
+                    <th className="px-3 py-2 text-left">Unit</th>
+                    <th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-right">Avg Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-3 py-4 text-center text-gray-500"
+                      >
+                        Loading inventory...
+                      </td>
+                    </tr>
+                  )}
+                  {!loading && items.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-3 py-4 text-center text-gray-500"
+                      >
+                        No items found.
+                      </td>
+                    </tr>
+                  )}
+                  {!loading &&
+                    items.map((item) => (
+                      <tr key={item.skuCode} className="border-t">
+                        <td className="px-3 py-2">{item.skuCode}</td>
+                        <td className="px-3 py-2">{item.name}</td>
+                        <td className="px-3 py-2">{item.categoryName}</td>
+                        <td className="px-3 py-2">{item.measuringUnit}</td>
+                        <td className="px-3 py-2 text-right">
+                          {Number(item.itemQty || 0).toLocaleString("en-IN")}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          ₹{Number(item.averageCost || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 p-4 border-t">
+          <button
+            type="button"
+            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- INGREDIENTS BULK UPDATE MODAL ---------- */
+function IngredientsModal({ onClose }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const fetchIngredients = async () => {
+      try {
+        setLoading(true);
+        const res = await api.get("/api/admin/ingredients");
+        const list = res.data?.ingredients || [];
+        setRows(
+          list.map((ing) => ({
+            ...ing,
+            percent: "",
+            newPrice: ing.currentPrice,
+          }))
+        );
+      } catch (err) {
+        console.error("Failed to load ingredients", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchIngredients();
+  }, []);
+
+  const handlePercentChange = (index, value) => {
+    setRows((prev) => {
+      const next = [...prev];
+      const row = next[index];
+      if (!row) return prev;
+      const pct = Number(value) || 0;
+      const base = Number(row.currentPrice) || 0;
+      const newPrice = base + (base * pct) / 100;
+      next[index] = {
+        ...row,
+        percent: value,
+        newPrice: Number(newPrice.toFixed(2)),
+      };
+      return next;
+    });
+  };
+
+  const handleNewPriceChange = (index, value) => {
+    setRows((prev) => {
+      const next = [...prev];
+      const row = next[index];
+      if (!row) return prev;
+      const price = Number(value);
+      next[index] = {
+        ...row,
+        newPrice: Number.isFinite(price) ? price : row.newPrice,
+        percent: "",
+      };
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    const updates = rows
+      .filter(
+        (r) =>
+          typeof r.newPrice === "number" &&
+          r.newPrice >= 0 &&
+          r.newPrice !== r.currentPrice
+      )
+      .map((r) => ({
+        refId: r.refId,
+        uom: r.uom,
+        newPrice: r.newPrice,
+      }));
+
+    if (updates.length === 0) {
+      onClose();
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await api.post("/api/admin/ingredients/bulk-update", { updates });
+      onClose();
+    } catch (err) {
+      console.error("Failed to update ingredients", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Update Ingredients</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-black text-2xl"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto p-6">
+          {loading ? (
+            <p className="text-gray-500 text-sm">Loading ingredients...</p>
+          ) : rows.length === 0 ? (
+            <p className="text-gray-500 text-sm">No ingredients found.</p>
+          ) : (
+            <table className="w-full text-sm border">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="p-2 text-left">Ingredient</th>
+                  <th className="p-2 text-center">UOM</th>
+                  <th className="p-2 text-right">Current Price</th>
+                  <th className="p-2 text-center w-32">% Increase</th>
+                  <th className="p-2 text-right w-32">New Price</th>
+                  <th className="p-2 text-center w-28">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={row.id} className="border-t">
+                    <td className="p-2">
+                      <div className="font-medium">{row.refId}</div>
+                    </td>
+                    <td className="p-2 text-center">{row.uom || "-"}</td>
+                    <td className="p-2 text-right">
+                      ₹{Number(row.currentPrice || 0).toFixed(2)}
+                    </td>
+                    <td className="p-2 text-center">
+                      <input
+                        type="number"
+                        className="w-20 border rounded px-1 py-0.5 text-right"
+                        value={row.percent}
+                        onChange={(e) =>
+                          handlePercentChange(index, e.target.value)
+                        }
+                        placeholder="%"
+                      />
+                    </td>
+                    <td className="p-2 text-right">
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-24 border rounded px-1 py-0.5 text-right"
+                        value={row.newPrice}
+                        onChange={(e) =>
+                          handleNewPriceChange(index, e.target.value)
+                        }
+                      />
+                    </td>
+                    <td className="p-2 text-center text-xs text-gray-500">
+                      {row.pricesVary ? "Varies across recipes" : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="flex justify-end gap-3 p-4 border-t">
+          <button
+            type="button"
+            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            className="px-4 py-2 text-sm rounded-lg bg-black text-white disabled:opacity-50 hover:bg-gray-800"
+            onClick={handleSave}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------- RECIPES MODAL ---------- */
 const TAB_MAIN = "main";
@@ -1438,6 +1867,313 @@ function MapIngredientsModal({ onClose }) {
   );
 }
 
+/* ---------- INGREDIENT INVENTORY MODAL (Indent/Issue) ---------- */
+function IngredientInventoryModal({ onClose }) {
+  const [tab, setTab] = useState("indent"); // indent | issue
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [verifyCosts, setVerifyCosts] = useState({});
+
+  const fetchRows = async (activeTab) => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/api/ingredient-indent", {
+        params:
+          activeTab === "issue"
+            ? { status: "ISSUED" }
+            : undefined,
+      });
+      let list = res.data?.data || [];
+      if (activeTab === "indent") {
+        list = list.filter((r) => r.status !== "ISSUED");
+      }
+      setRows(list);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to load inventory");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRows(tab);
+  }, [tab]);
+
+  const verify = async (id, costOverride) => {
+    try {
+      const cost = costOverride !== undefined ? costOverride : verifyCosts[id];
+      await api.patch(`/api/ingredient-indent/${id}/verify`, { cost });
+      await fetchRows("indent");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Verify failed");
+    }
+  };
+
+  const issue = async (id, fulfillFromWarehouse) => {
+    try {
+      await api.patch(`/api/ingredient-indent/${id}/issue`, fulfillFromWarehouse ? { fulfillFromWarehouse: true } : {});
+      await fetchRows("indent");
+      toast.success(
+        fulfillFromWarehouse ? "Issued from Warehouse Stock — no client charge" : "Item issued successfully"
+      );
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Issue failed");
+    }
+  };
+
+  const deleteIndent = async (id) => {
+    if (!window.confirm("Delete this indent item? This cannot be undone.")) return;
+    try {
+      await api.delete(`/api/ingredient-indent/${id}`);
+      setRows((prev) => prev.filter((r) => r._id !== id));
+      toast.success("Indent item deleted");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Delete failed");
+    }
+  };
+
+  const deleteIssued = async (id) => {
+    if (!window.confirm("Delete this issued item? This cannot be undone.")) return;
+    try {
+      await api.delete(`/api/ingredient-indent/${id}`);
+      setRows((prev) => prev.filter((r) => r._id !== id));
+      await fetchRows("issue");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Delete failed");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Inventory</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-black text-2xl"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex border-b">
+          <button
+            type="button"
+            onClick={() => setTab("indent")}
+            className={`px-6 py-3 font-medium ${
+              tab === "indent"
+                ? "border-b-2 border-black text-black"
+                : "text-gray-500"
+            }`}
+          >
+            Indent
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("issue")}
+            className={`px-6 py-3 font-medium ${
+              tab === "issue"
+                ? "border-b-2 border-black text-black"
+                : "text-gray-500"
+            }`}
+          >
+            Issue
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-6">
+          {error && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div className="border rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="p-2 text-left">Brand</th>
+                  <th className="p-2 text-left">Client</th>
+                  <th className="p-2 text-left">Recipe</th>
+                  <th className="p-2 text-left">Ingredient</th>
+                  <th className="p-2 text-left">Ing Brand</th>
+                  <th className="p-2 text-left">Category</th>
+                  <th className="p-2 text-left">UOM</th>
+                  <th className="p-2 text-right">Qty</th>
+                  <th className="p-2 text-right">Cost</th>
+                  <th className="p-2 text-center w-56">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={10} className="p-4 text-center text-gray-500">
+                      Loading...
+                    </td>
+                  </tr>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-4 text-center text-gray-500">
+                      No records.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((r) => (
+                    <tr key={r._id} className="border-t">
+                      <td className="p-2">{r.requestBrandName || "—"}</td>
+                      <td className="p-2">{r.clientBrandName || "—"}</td>
+                      <td className="p-2">
+                        <div className="font-medium">{r.recipeName || "—"}</div>
+                        <div className="text-xs text-gray-500">{r.branchCode}</div>
+                        {r.indentType === "WAREHOUSE_TRANSFER" && (
+                          <div className="text-xs mt-1">
+                            <span className="bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
+                              Warehouse Transfer{r.sourceBranchCode ? ` (from ${r.sourceBranchCode})` : ""}
+                            </span>
+                          </div>
+                        )}
+                        {r.indentType === "INVENTORY_TRANSFER" && (
+                          <div className="text-xs mt-1">
+                            <span className="bg-teal-50 text-teal-700 border border-teal-200 px-1.5 py-0.5 rounded">
+                              Warehouse Stock Transfer (prepaid)
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {r.itemName}
+                        {Number(r.warehouseStockAvailable || 0) > 0 && (
+                          <div className="text-xs mt-1">
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
+                              In Warehouse Stock: {Number(r.warehouseStockAvailable).toFixed(2)} {r.uom || ""}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-2">{r.ingredientBrand || "—"}</td>
+                      <td className="p-2">{r.categoryName || "—"}</td>
+                      <td className="p-2">{r.uom || "—"}</td>
+                      <td className="p-2 text-right">{Number(r.qty || 0)}</td>
+                      <td className="p-2 text-right">
+                        {r.indentType === "WAREHOUSE_TRANSFER" ? "—" : `₹${Number(r.cost || 0).toFixed(2)}`}
+                      </td>
+                      <td className="p-2 text-center">
+                        {tab === "issue" ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded">
+                              Issued
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => deleteIssued(r._id)}
+                              className="text-xs text-red-600 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ) : r.status === "INDENT_PENDING" ? (
+                          r.indentType === "WAREHOUSE_TRANSFER" || r.indentType === "INVENTORY_TRANSFER" ? (
+                            <button
+                              type="button"
+                              onClick={() => verify(r._id, 0)}
+                              className="bg-black text-white px-3 py-1.5 rounded text-xs hover:bg-gray-800"
+                            >
+                              Verify Transfer
+                            </button>
+                          ) : (
+                          <div className="flex items-center justify-center gap-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              placeholder="Cost"
+                              value={verifyCosts[r._id] ?? ""}
+                              onChange={(e) =>
+                                setVerifyCosts((prev) => ({
+                                  ...prev,
+                                  [r._id]: e.target.value,
+                                }))
+                              }
+                              className="w-24 border rounded px-2 py-1 text-xs text-right"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => verify(r._id)}
+                              className="bg-black text-white px-3 py-1.5 rounded text-xs hover:bg-gray-800"
+                            >
+                              Verify
+                            </button>
+                          </div>
+                          )
+                        ) : (
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="text-xs text-blue-700 bg-blue-50 border border-blue-200 px-2 py-1 rounded">
+                              Verified
+                            </span>
+                            {(!r.indentType || r.indentType === "PROCUREMENT") &&
+                            Number(r.warehouseStockAvailable || 0) < Number(r.qty || 0) ? (
+                              <span className="text-xs text-red-700 bg-red-50 border border-red-200 px-2 py-1 rounded">
+                                Out of Stock
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => issue(r._id)}
+                                className="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700"
+                              >
+                                Issue
+                              </button>
+                            )}
+                            {Number(r.warehouseStockAvailable || 0) >= Number(r.qty || 0) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      "This will fulfill the indent from the brand's Warehouse Stock (Purchase Register) instead of new procurement. Cost will be set to ₹0 — the client will not be charged. Continue?"
+                                    )
+                                  ) {
+                                    issue(r._id, true);
+                                  }
+                                }}
+                                className="bg-amber-600 text-white px-3 py-1.5 rounded text-xs hover:bg-amber-700"
+                              >
+                                Fulfill from Warehouse Stock
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => deleteIndent(r._id)}
+                              className="text-xs text-red-600 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 p-4 border-t">
+          <button
+            type="button"
+            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------- GRN MODAL (Recipe admin view of issued items) ---------- */
 function GrnModal({ onClose }) {
@@ -1686,6 +2422,124 @@ function GrnModal({ onClose }) {
   );
 }
 
+/* ---------- CREDIT NOTE MODAL (Ingredient admin alerts) ---------- */
+function CreditNoteModal({ onClose }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/api/credit-notes");
+      setRows(res.data?.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to load credit notes");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const remove = async (id) => {
+    if (!window.confirm("Delete this credit note alert?")) return;
+    try {
+      await api.delete(`/api/credit-notes/${id}`);
+      setRows((prev) => prev.filter((r) => r._id !== id));
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to delete credit note");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Credit Note</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-black text-2xl"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto p-6">
+          {error && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+          <div className="border rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="p-2 text-left">Ingredient</th>
+                  <th className="p-2 text-left">Created At</th>
+                  <th className="p-2 text-center w-32">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={3} className="p-4 text-center text-gray-500">
+                      Loading...
+                    </td>
+                  </tr>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="p-4 text-center text-gray-500">
+                      No credit note alerts.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((r) => (
+                    <tr key={r._id} className="border-t">
+                      <td className="p-2">{r.ingredientName}</td>
+                      <td className="p-2">
+                        {r.createdAt ? new Date(r.createdAt).toLocaleString() : "—"}
+                      </td>
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => remove(r._id)}
+                          className="text-sm text-red-600 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 p-4 border-t">
+          <button
+            type="button"
+            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            onClick={onClose}
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            className="px-4 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+            onClick={load}
+            disabled={loading}
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------- TRIAL & TRAINING RECIPES MODAL ---------- */
 function TrialTrainingModal({ onClose }) {
@@ -2766,5 +3620,621 @@ function FcrModal({ onClose }) {
   );
 }
 
+/* ---------- CHECK STOCK MODAL ---------- */
+function CheckStockModal({ onClose }) {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const fetchAll = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/api/stock-updates/all");
+      setRecords(res.data?.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to fetch stock data");
+      setRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAll();
+  }, []);
+
+  const filtered = records.filter(
+    (r) =>
+      !search ||
+      r.brandName?.toLowerCase().includes(search.toLowerCase()) ||
+      r.date?.includes(search)
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Check Stock</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
+        </div>
+
+        <div className="p-4 border-b flex gap-3 items-center">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter by brand or date (YYYY-MM-DD)"
+            className="border rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:ring-2 focus:ring-black"
+          />
+          <button
+            type="button"
+            onClick={fetchAll}
+            disabled={loading}
+            className="px-4 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {error && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {loading && (
+            <p className="text-center text-gray-500 py-8">Loading stock records...</p>
+          )}
+
+          {!loading && filtered.length === 0 && (
+            <p className="text-center text-gray-500 py-8">No stock records found.</p>
+          )}
+
+          {!loading && filtered.map((record) => (
+            <div key={record._id} className="border rounded-xl mb-3 overflow-hidden">
+              <button
+                type="button"
+                className="w-full flex justify-between items-center px-4 py-3 bg-gray-50 hover:bg-gray-100 text-left"
+                onClick={() => setExpandedId(expandedId === record._id ? null : record._id)}
+              >
+                <div className="flex gap-6 text-sm">
+                  <span className="font-semibold">{record.brandName}</span>
+                  <span className="text-gray-500">{record.date}</span>
+                  <span className="text-gray-400">{record.items?.length || 0} items</span>
+                </div>
+                <span className="text-gray-400 text-xs">{expandedId === record._id ? "▲" : "▼"}</span>
+              </button>
+
+              {expandedId === record._id && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Item</th>
+                        <th className="px-3 py-2 text-left">UOM</th>
+                        <th className="px-3 py-2 text-right">Issue</th>
+                        <th className="px-3 py-2 text-right">Used</th>
+                        <th className="px-3 py-2 text-right">Wastage</th>
+                        <th className="px-3 py-2 text-right">Remaining</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(record.items || []).map((item, idx) => (
+                        <tr key={idx} className="border-t">
+                          <td className="px-3 py-2">{item.itemName}</td>
+                          <td className="px-3 py-2">{item.uom}</td>
+                          <td className="px-3 py-2 text-right">{item.issueQty}</td>
+                          <td className="px-3 py-2 text-right">{item.usedQty}</td>
+                          <td className="px-3 py-2 text-right">{item.wastageQty}</td>
+                          <td className="px-3 py-2 text-right font-medium">{item.remainingQty}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end p-4 border-t">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- STOCK UPDATE MODAL ---------- */
+function StockUpdateModal({ onClose }) {
+  const emptyItem = { itemName: "", uom: "", issueQty: "", usedQty: "", wastageQty: "", remainingQty: "" };
+
+  const [brands, setBrands] = useState([]);
+  const [brandId, setBrandId] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [items, setItems] = useState([{ ...emptyItem }]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.get("/api/admin/brands")
+      .then((res) => {
+        const list = Array.isArray(res.data) ? res.data : [];
+        setBrands(list);
+        if (list.length) setBrandId(list[0]._id);
+      })
+      .catch(() => setBrands([]));
+  }, []);
+
+  const updateItem = (idx, field, value) => {
+    setItems((prev) => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  };
+
+  const addItem = () => setItems((prev) => [...prev, { ...emptyItem }]);
+
+  const removeItem = (idx) => setItems((prev) => prev.filter((_, i) => i !== idx));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (!brandId) return setError("Brand is required.");
+    if (!date) return setError("Date is required.");
+    if (items.length === 0) return setError("Add at least one item.");
+
+    const parsedItems = items.map((it) => ({
+      itemName: it.itemName.trim(),
+      uom: it.uom.trim(),
+      issueQty: Number(it.issueQty),
+      usedQty: Number(it.usedQty),
+      wastageQty: Number(it.wastageQty),
+      remainingQty: Number(it.remainingQty),
+    }));
+
+    const invalid = parsedItems.find(
+      (it) => !it.itemName || !it.uom || [it.issueQty, it.usedQty, it.wastageQty, it.remainingQty].some((n) => isNaN(n) || n < 0)
+    );
+    if (invalid) return setError("All item fields are required and quantities must be ≥ 0.");
+
+    setSubmitting(true);
+    try {
+      await api.post("/api/stock-updates", { brandId, date, items: parsedItems });
+      toast.success("Stock updated successfully");
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to submit stock update.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Stock Update</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex-1 overflow-auto p-6 space-y-5">
+          {error && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+              <select
+                value={brandId}
+                onChange={(e) => setBrandId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              >
+                {brands.length === 0 && <option value="">Loading brands...</option>}
+                {brands.map((b) => (
+                  <option key={b._id} value={b._id}>{b.brandName}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-gray-700">Items</span>
+              <button
+                type="button"
+                onClick={addItem}
+                className="text-sm px-3 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 border"
+              >
+                + Add Item
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {items.map((item, idx) => (
+                <div key={idx} className="border rounded-xl p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-2 items-end">
+                  <div className="col-span-2 md:col-span-1 lg:col-span-2">
+                    <label className="block text-xs text-gray-500 mb-1">Item Name</label>
+                    <input
+                      type="text"
+                      value={item.itemName}
+                      onChange={(e) => updateItem(idx, "itemName", e.target.value)}
+                      placeholder="e.g. Tomato"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">UOM</label>
+                    <input
+                      type="text"
+                      value={item.uom}
+                      onChange={(e) => updateItem(idx, "uom", e.target.value)}
+                      placeholder="KG"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                  {["issueQty", "usedQty", "wastageQty", "remainingQty"].map((field) => (
+                    <div key={field}>
+                      <label className="block text-xs text-gray-500 mb-1 capitalize">
+                        {field.replace("Qty", " Qty")}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={item[field]}
+                        onChange={(e) => updateItem(idx, field, e.target.value)}
+                        placeholder="0"
+                        className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                      />
+                    </div>
+                  ))}
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={() => removeItem(idx)}
+                      disabled={items.length === 1}
+                      className="text-red-500 hover:text-red-700 text-lg disabled:opacity-30"
+                      title="Remove item"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              {submitting ? "Submitting..." : "Submit"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- PURCHASE REGISTER MODAL ---------- */
+function PurchaseRegisterModal({ onClose }) {
+  const emptyForm = {
+    itemName: "",
+    ingredientBrand: "",
+    uom: "KG",
+    qty: "",
+    pricePerUnit: "",
+    expiryDate: "",
+    vendorName: "",
+  };
+
+  const [brands, setBrands] = useState([]);
+  const [brandId, setBrandId] = useState("");
+  const [form, setForm] = useState({ ...emptyForm });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const [stock, setStock] = useState([]);
+  const [loadingStock, setLoadingStock] = useState(false);
+
+  useEffect(() => {
+    api.get("/api/admin/brands")
+      .then((res) => {
+        const list = Array.isArray(res.data) ? res.data : [];
+        setBrands(list);
+        if (list.length) setBrandId(list[0]._id);
+      })
+      .catch(() => setBrands([]));
+  }, []);
+
+  const selectedBrand = brands.find((b) => b._id === brandId);
+
+  const loadStock = async () => {
+    if (!selectedBrand) return;
+    setLoadingStock(true);
+    try {
+      const res = await api.get(`/api/purchase-register/${encodeURIComponent(selectedBrand.brandName)}`);
+      setStock(res.data?.data || []);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to load purchase register stock.");
+      setStock([]);
+    } finally {
+      setLoadingStock(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedBrand) loadStock();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandId]);
+
+  const updateField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (!selectedBrand) return setError("Brand is required.");
+
+    const itemName = form.itemName.trim();
+    const ingredientBrand = form.ingredientBrand.trim();
+    const uom = form.uom.trim();
+    const qty = Number(form.qty);
+    const pricePerUnit = Number(form.pricePerUnit);
+
+    if (!itemName) return setError("Item name is required.");
+    if (!ingredientBrand) return setError("Ingredient brand is required.");
+    if (!uom) return setError("UOM is required.");
+    if (!Number.isFinite(qty) || qty <= 0) return setError("Quantity must be greater than 0.");
+    if (!Number.isFinite(pricePerUnit) || pricePerUnit < 0) return setError("Price must be a valid non-negative number.");
+    if (!form.expiryDate) return setError("Expiry date is required.");
+
+    setSubmitting(true);
+    try {
+      await api.post("/api/purchase-register", {
+        brandName: selectedBrand.brandName,
+        itemName,
+        ingredientBrand,
+        uom,
+        qty,
+        pricePerUnit,
+        expiryDate: form.expiryDate,
+        vendorName: form.vendorName.trim(),
+      });
+      toast.success("Purchase entry added successfully");
+      setForm({ ...emptyForm });
+      loadStock();
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to add purchase entry.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[95vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center p-6 border-b">
+          <h2 className="text-2xl font-bold">Purchase Register</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-black text-2xl">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-hidden flex min-h-0">
+        <form onSubmit={handleSubmit} className="w-1/2 overflow-auto p-6 space-y-5 border-r">
+          {error && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+            <select
+              value={brandId}
+              onChange={(e) => setBrandId(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+            >
+              {brands.length === 0 && <option value="">Loading brands...</option>}
+              {brands.map((b) => (
+                <option key={b._id} value={b._id}>{b.brandName}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Item Name</label>
+              <input
+                type="text"
+                value={form.itemName}
+                onChange={(e) => updateField("itemName", e.target.value)}
+                placeholder="e.g. Paneer"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ingredient Brand</label>
+              <input
+                type="text"
+                value={form.ingredientBrand}
+                onChange={(e) => updateField("ingredientBrand", e.target.value)}
+                placeholder="e.g. Amul"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.qty}
+                onChange={(e) => updateField("qty", e.target.value)}
+                placeholder="0"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">UOM</label>
+              <select
+                value={form.uom}
+                onChange={(e) => updateField("uom", e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              >
+                <option value="KG">KG</option>
+                <option value="GM">GM</option>
+                <option value="L">L</option>
+                <option value="ML">ML</option>
+                <option value="PC">PC</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Price per Unit (₹)</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.pricePerUnit}
+                onChange={(e) => updateField("pricePerUnit", e.target.value)}
+                placeholder="0.00"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+              <input
+                type="date"
+                value={form.expiryDate}
+                onChange={(e) => updateField("expiryDate", e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor Name (optional)</label>
+              <input
+                type="text"
+                value={form.vendorName}
+                onChange={(e) => updateField("vendorName", e.target.value)}
+                placeholder="e.g. Local Vendor"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-5 py-2 text-sm rounded-lg bg-black text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "Add Purchase"}
+            </button>
+          </div>
+        </form>
+
+        <div className="w-1/2 overflow-auto p-6">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">
+              Purchase Register Stock{selectedBrand ? ` — ${selectedBrand.brandName}` : ""}
+            </h3>
+            <button
+              type="button"
+              onClick={loadStock}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Refresh
+            </button>
+          </div>
+          {loadingStock ? (
+            <p className="text-sm text-gray-400 text-center">Loading stock...</p>
+          ) : stock.length === 0 ? (
+            <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center">
+              <p className="text-sm font-medium text-gray-500">No purchase entries found for this brand.</p>
+            </div>
+          ) : (
+            <div className="border rounded-lg overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Item</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Ing. Brand</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-700">Remaining</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">UOM</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Expiry</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-700">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stock.map((item, idx) => (
+                    <tr key={item._id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                      <td className="px-3 py-2 font-medium">{item.itemName}</td>
+                      <td className="px-3 py-2 text-gray-600">{item.ingredientBrand}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{Number(item.qtyRemaining || 0).toFixed(3)}</td>
+                      <td className="px-3 py-2 text-gray-500 uppercase text-xs">{item.uom}</td>
+                      <td className="px-3 py-2">
+                        {new Date(item.expiryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                        {item.expiringSoon && item.status !== "DEPLETED" && item.status !== "CANCELLED" && (
+                          <span className="ml-2 text-xs font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+                            {"⚠"} Soon
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs">{item.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default AdminDashboard;
