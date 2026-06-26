@@ -6,6 +6,7 @@ import StockUpdate from "../models/stockUpdate.js";
 import ProducerAudit from "../models/producerAudit.js";
 import ProductionOrder from "../models/productionOrder.js";
 import DeliveryQc from "../models/deliveryQc.js";
+import Order from "../models/order.js";
 import cloudinary from "../config/cloudinary.js";
 import { computeBrandSalesSummary } from "../utils/salesSummary.js";
 import { computeBrandFcrSummary } from "./costing.controller.js";
@@ -14,6 +15,7 @@ import FcrConfirmation from "../models/fcrConfirmation.js";
 import { verifyRazorpaySignature } from "../utils/razorpay.js";
 import { recomputeGrnVisibilityForInvoice } from "../utils/grnVisibility.js";
 import { sendEmail, invoicePaidEmailHtml } from "../services/email.service.js";
+import { uploadImageBuffer } from "../utils/cloudinaryUpload.js";
 
 /* ============================================================
  * Constants
@@ -134,6 +136,27 @@ export async function updateLogo(req, res) {
   }
 }
 
+// uploadLogoFile — receives a multipart logo file (multer memory buffer),
+// pushes it to Cloudinary under "client-logos", and returns the secure URL.
+// The frontend then calls PATCH /logo with this URL to persist it on the User.
+export async function uploadLogoFile(req, res) {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    const { secureUrl } = await uploadImageBuffer(
+      req.file.buffer,
+      "client-logos",
+      req.file.originalname || "logo"
+    );
+    return res.status(201).json({ logoUrl: secureUrl });
+  } catch (err) {
+    console.error("uploadLogoFile error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to upload logo" });
+  }
+}
+
 /* ============================================================
  * 2. Assigned branches
  * ========================================================== */
@@ -178,6 +201,29 @@ export async function getOnboardingStatus(req, res) {
   } catch (err) {
     console.error("getOnboardingStatus error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load onboarding status" });
+  }
+}
+
+/* ============================================================
+ * 3b. SOP documents (read-only). The POC enters these via the POC dashboard
+ * (POST /api/poc/clients/:clientId/sop — UNCHANGED); the client reads back their
+ * OWN list here. No lifecycle gate: SOPs are an onboarding-phase deliverable,
+ * visible from first login. Scoped strictly to req.user._id (no cross-brand leak).
+ * ========================================================== */
+
+export async function getSopDocuments(req, res) {
+  try {
+    if (!requireClient(req, res)) return;
+
+    const user = await User.findById(req.user._id).select("sopDocuments").lean();
+    const documents = (user?.sopDocuments || [])
+      .map((d) => ({ title: d.title, link: d.link, updatedAt: d.updatedAt }))
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+    return res.json({ documents });
+  } catch (err) {
+    console.error("getSopDocuments error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to load SOP documents" });
   }
 }
 
@@ -322,6 +368,26 @@ function summaryToKpis(s) {
   };
 }
 
+/**
+ * Manual local-kitchen order totals over a UTC date window (CLAUDE.md §25).
+ * "order" = one dish unit, so totalOrders = Σ qty (matches the Local Kitchen view).
+ * Manual orders carry no tax/discount, so revenue == net here.
+ *
+ * @returns {Promise<{ totalOrders: number, totalRevenue: number }>}
+ */
+async function getManualOrderTotals({ brandId, branchCode, start, end }) {
+  const q = { entryType: "MANUAL_LOCAL", brandId, orderDate: { $gte: start, $lt: end } };
+  if (branchCode && String(branchCode).trim()) q.branchCode = String(branchCode).trim().toUpperCase();
+  const orders = await Order.find(q).select("qty totalAmount").lean();
+  let totalOrders = 0;
+  let totalRevenue = 0;
+  for (const o of orders) {
+    totalOrders += Number(o.qty || 0);
+    totalRevenue += Number(o.totalAmount || 0);
+  }
+  return { totalOrders, totalRevenue };
+}
+
 export async function getDailyAnalytics(req, res) {
   try {
     if (!requireClient(req, res)) return;
@@ -344,7 +410,35 @@ export async function getDailyAnalytics(req, res) {
       branches,
     });
 
-    return res.json(summaryToKpis(summary));
+    // Combined source: Rista (online) + manual local-kitchen orders (walk-ins etc).
+    // The two are summed — different order streams, no dedup (per §25). The client
+    // sees one unified number, never a Rista-vs-manual split.
+    const dayStart = new Date(`${date}T00:00:00.000Z`);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+    const manual = await getManualOrderTotals({
+      brandId: req.user._id, branchCode, start: dayStart, end: dayEnd,
+    });
+
+    const kpis = summaryToKpis(summary);
+    const ristaItemQty = !summary || summary.noData ? 0 : Number(summary.totalItemQty || 0);
+    const ristaItemNet = ristaItemQty * (!summary || summary.noData ? 0 : Number(summary.avgItemSellingPrice || 0));
+
+    const totalOrders = kpis.totalOrders + manual.totalOrders;
+    const totalRevenue = kpis.totalRevenue + manual.totalRevenue;
+    const combinedItemQty = ristaItemQty + manual.totalOrders;
+    const combinedItemNet = ristaItemNet + manual.totalRevenue;
+
+    return res.json({
+      noData: totalOrders === 0 && totalRevenue === 0,
+      totalOrders,
+      totalRevenue: Number(totalRevenue.toFixed(2)),
+      netRevenue: Number((kpis.netRevenue + manual.totalRevenue).toFixed(2)),
+      totalTaxes: kpis.totalTaxes,          // Rista only — manual orders carry none
+      totalDiscounts: kpis.totalDiscounts,  // Rista only — manual orders carry none
+      avgOrderValue: totalOrders ? Number((totalRevenue / totalOrders).toFixed(2)) : 0,
+      avgItemSellingPrice: combinedItemQty ? Number((combinedItemNet / combinedItemQty).toFixed(2)) : 0,
+    });
   } catch (err) {
     console.error("getDailyAnalytics error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load analytics" });
@@ -413,13 +507,27 @@ export async function getRangeAnalytics(req, res) {
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
+    // Combined source: fold in manual local-kitchen orders across the whole range
+    // ([start, endDate + 1 day)). Summed with Rista, no dedup (§25). Manual orders
+    // carry no tax/discount, so they add only to orders/revenue/net + item averages.
+    const rangeEnd = new Date(end);
+    rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 1);
+    const manual = await getManualOrderTotals({
+      brandId: req.user._id, branchCode, start, end: rangeEnd,
+    });
+    agg.totalOrders += manual.totalOrders;
+    agg.totalRevenue += manual.totalRevenue;
+    agg.netRevenue += manual.totalRevenue;
+    totalItemQty += manual.totalOrders;
+    totalItemNet += manual.totalRevenue;
+
     return res.json({
       noData: agg.totalOrders === 0 && agg.totalRevenue === 0,
       totalOrders: agg.totalOrders,
-      totalRevenue: agg.totalRevenue,
-      netRevenue: agg.netRevenue,
-      totalTaxes: agg.totalTaxes,
-      totalDiscounts: agg.totalDiscounts,
+      totalRevenue: Number(agg.totalRevenue.toFixed(2)),
+      netRevenue: Number(agg.netRevenue.toFixed(2)),
+      totalTaxes: agg.totalTaxes,          // Rista only — manual orders carry none
+      totalDiscounts: agg.totalDiscounts,  // Rista only — manual orders carry none
       avgOrderValue: agg.totalOrders
         ? Number((agg.totalRevenue / agg.totalOrders).toFixed(2))
         : 0,

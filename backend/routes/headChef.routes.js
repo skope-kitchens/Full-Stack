@@ -8,9 +8,13 @@
 import express from "express";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireAdmin.js";
+import { uploadExcel } from "../middleware/uploadExcel.js";
 import {
   getBrandsSummary,
   addIngredient,
+  getRecipeImportTemplate,
+  postRecipeImportPreview,
+  postRecipeImportCommit,
   sendIngredientListToPoc,
   promoteToFinal,
   getProductionPlan,
@@ -83,5 +87,10 @@ router.get("/rista-stock-comparison", ...guard, getRistaStockComparison);
 router.get("/fcr/:brandName", ...guard, getFcr);
 router.get("/menu/:brandName", ...guard, getMenu);
 router.get("/projections/:brandName", ...guard, getProjections);
+
+// 15. Recipe Import (bulk onboarding via Excel template) — CLAUDE.md §26
+router.get("/recipe-import-template", ...guard, getRecipeImportTemplate);
+router.post("/recipe-import-preview", ...guard, uploadExcel, postRecipeImportPreview);
+router.post("/recipe-import-commit", ...guard, uploadExcel, postRecipeImportCommit);
 
 export default router;

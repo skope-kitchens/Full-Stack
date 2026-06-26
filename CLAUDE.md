@@ -466,6 +466,8 @@ Earlier there was a confusing split between "real warehouse" (`brand_stocks`) an
 
 **Deferred (not built):** Data Analyst dashboard, realized FCR, and the analyst engine — per the build order. (POC dashboard is now BUILT — see §17.)
 
+**Addendum — SOP Documents now visible to the client (read-only; built later):** The POC-entered `sopDocuments[]` (title + link, written via the unchanged `POST /api/poc/clients/:clientId/sop` — §17) used to be write-only. A read-only client view now exists: new `GET /api/client/sop` (`getSopDocuments` in `client.controller.js`, routed in `client.routes.js`) — `requireClient`-gated, scoped to `req.user._id` (no cross-brand leak), **NO lifecycle gate** (SOPs are an onboarding-phase deliverable, visible from `AWAITING_MENU` onward), returns `{ documents: [{title, link, updatedAt}] }` sorted newest-first (empty array, never 404, when none entered). Frontend: a new **"SOP Documents"** drawer item (right after "Service Onboarding Status") + read-only `SopView` in `Dashboard.jsx` (title + "Open SOP" link in a new tab; empty state "Your SOPs will appear here as your POC finalises them"). No add/edit/delete on the client side; the POC writer is untouched.
+
 ## 17. Feature Log — POC Dashboard (built, B2C)
 
 **What it is:** The second of the six role-scoped dashboards. A Skope-internal POC (Point of Contact) tool at `/poc`. TWO POCs share ONE login and manage EVERY client from one dashboard (no per-POC client subsets). The POC owns the operational data the client views read-only.
@@ -744,6 +746,80 @@ Per the no-emoji convention used by POC/Stock Manager/Head Chef/Local Kitchen, A
 **Files:** new `backend/services/email.service.js`, `backend/middleware/uploadInvoiceAttachment.js`, `backend/utils/cloudinaryUpload.js`, `backend/utils/razorpay.js`, `backend/utils/grnVisibility.js`; edited `backend/models/user.js`, `deliveryQc.js`, `productionOrder.js`, `procurementLog.js`, `backend/controllers/poc.controller.js` + `routes/poc.routes.js`, `controllers/stockManager.controller.js` + `routes/stockManager.routes.js`, `controllers/client.controller.js` + `routes/client.routes.js`, `controllers/productionOrder.controller.js` + `routes/productionOrder.routes.js`; edited `frontend/src/pages/Dashboard.jsx`, `PocDashboard.jsx`, `StockManager.jsx`.
 
 **Untouched / frozen (verified):** `wallet.routes.js`, `wallet.controller.js`, `WalletPanel.jsx` (NONE modified); `authMiddleware`, `applyStockCascade`, `bomExpander`, `expandItem`, `brand_stocks`/`purchase_register` schemas + FEFO, recipe schemas, signup, nav, footer; Head Chef + Local Kitchen dashboards.
+
+## 25. Feature Log — Manual Order Entry (Local Kitchen) + Client Analytics Reroute (built)
+
+**What it is:** A manual order-capture workflow on the **Local Kitchen** dashboard that fires the stock cascade at the kitchen, plus a **client analytics reroute** so the client's Per-Day / Date-Range views show **Rista + manual orders combined**. This stands in for the (leadership-pending) Rista live integration — orders are entered by hand, no Rista dependency. NEVER touches money (wallet frozen).
+
+**The `orders` collection is now ACTIVE.** The pre-existing `orders` collection (the old wallet-coupled production-request model with the never-advancing state machine) was **REUSED and extended additively** — NOT rebuilt. A `MANUAL_LOCAL` order stream now lives alongside the legacy `WALLET` records in the same collection, separated by a new `entryType` discriminator.
+
+**Definition (founder-confirmed):** **"order" = one dish unit.** A qty-3 entry counts as **3 orders** in every total — both the Local Kitchen today-view summary and the client analytics. Applied consistently.
+
+**Schema (additive only — no migration; existing wallet orders default `entryType:"WALLET"` and still validate):**
+- `order.js`: `+entryType` (`WALLET`|`MANUAL_LOCAL`, default `WALLET`, indexed), `+brandName`, `+brandId`, `+branchCode`, `+recipeId`, `+recipeName`, `+qty`, `+unitPrice`, `+totalAmount`, `+source` (`WALK_IN`|`SWIGGY`|`ZOMATO`|`OTHER`), `+timeBucket` (`MORNING`|`AFTERNOON`|`EVENING`|`LATE_NIGHT`), `+orderDate`, `+enteredBy`, `+enteredAt`, `+cascadeApplied` (default true), `+overrideReason`, `+cascadeDeductions[]` (`{itemName,qty,uom,location,stockId}` — records exactly what was debited so a within-window DELETE reverses it precisely). New index `{brandId, branchCode, orderDate}`. A manual order ALSO sets the legacy required `brand` = `brandId` (and `amount` = `totalAmount`) so the existing schema constraints are satisfied.
+- `procurementLog.js` enum: `+ORDER_INGESTED`, `+ORDER_REVERSED`.
+
+**Cascade wrapper — `backend/utils/orderCascade.js` (NEW). `applyStockCascade` is NOT imported or modified.** `projection.controller.js#applyStockCascade` is module-private AND read-only (it never mutates). Per founder approval, rather than export/alter the frozen function, this wrapper **replicates** the two LOCAL cascade levels (**BRANCH_KITCHEN → SEMI_FINISHED** at the kitchen's branchCode) using the SAME shared utilities (`extractIngredientsFromBOM`, `aggregateIngredients`, `convertQty`, `escapeRegex`) and mirrors the **already-shipped deduction pattern** from `productionOrder.controller.js` (clamped `$inc` + `TRANSFER_OUT` history). Three exports:
+- `previewOrderCascade({brandName,branchCode,recipeId,qty})` — PURE READ. Expands the MainRecipe BOM to raw leaves, sums available SEMI_FINISHED+BRANCH_KITCHEN at the branch, returns `{canFulfil, insufficientItems:[{itemName,currentQty,requiredQty,shortfall,uom}]}`.
+- `applyOrderCascade({...,orderId,allowNegative,session})` — MUTATES inside the passed mongoose session. Debits BRANCH_KITCHEN then SEMI_FINISHED, clamped; on `allowNegative` (override) pushes the unmet remainder into BRANCH_KITCHEN going **negative** (so the next closing audit surfaces the variance). Returns the exact `deductions[]`.
+- `reverseOrderCascade({deductions,orderId,recipeName,session})` — credits the recorded deductions back (`TRANSFER_IN`) for the DELETE path.
+
+**Local Kitchen backend (`localKitchen.controller.js` + `localKitchen.routes.js`, all `requireRole("LOCAL_KITCHEN")`, branch-scoped to `req.user.branchCode`):**
+- `GET /api/local-kitchen/recipes-for-orders?brandName=` → `[{recipeId,recipeName}]` (MainRecipe, exact-brand). Brand-assigned-to-kitchen guard.
+- `POST /api/local-kitchen/orders` → validates brand∈kitchen (403 "Brand not served by this kitchen"), qty int≥1, price≥0, source/bucket enums, `orderDate` today…−7 days (400 otherwise). Looks up MainRecipe by `recipeId`+exact brand (404). **Pre-checks `previewOrderCascade`**: if insufficient & not override → **409** `{blocked,reason:"INSUFFICIENT_STOCK",items:[...]}`. Override requires a non-empty `overrideReason`. Inserts the order + `applyOrderCascade` in **ONE mongoose transaction**; `cascadeApplied=false` only when stock was genuinely short. Emits `ORDER_INGESTED`.
+- `GET /api/local-kitchen/orders?date=&brandName=` → grouped by recipe + time bucket, with a daily summary `{totalOrders=Σqty, totalRevenue}` and per-entry drill-down.
+- `DELETE /api/local-kitchen/orders/:orderId` → only within **30 min** of entry (`ORDER_DELETE_WINDOW_MIN`); reverses the cascade then deletes; emits `ORDER_REVERSED`.
+
+**Local Kitchen frontend (`LocalKitchen.jsx`):** new brand-workspace drawer item **"Order Entry"** (after "Local Stock"). Brand comes from the already-selected workspace brand (no redundant in-form brand dropdown — the dashboard is brand-first). Form: **dish dropdown (no typing)**, qty, unit price, source dropdown, time-bucket dropdown (auto-selected by current time — <11 Morning / 11–16 Afternoon / 16–21 Evening / >21 Late Night — overridable), date picker (today…−7d). 409 → warning modal listing the negative ingredients → "Override & record" requires a reason → resubmits `override:true`. Below: daily summary card + per-recipe/per-bucket table with click-to-expand entries (Delete button on entries <30 min old).
+
+**Client analytics reroute (`client.controller.js`):** `getDailyAnalytics` + `getRangeAnalytics` now **combine** Rista (`computeBrandSalesSummary`, unchanged) **+ manual orders** via new `getManualOrderTotals({brandId,branchCode,start,end})`. Sums (no dedup — different streams; double-entry would be an operational mistake, not a code bug):
+- `totalOrders += Σqty`, `totalRevenue += ΣtotalAmount`, `netRevenue += ΣtotalAmount` (manual = no tax).
+- `totalTaxes` / `totalDiscounts` — **Rista only**; manual contributes **0** (the chef enters no tax/discount per order).
+- `avgOrderValue` recomputed on combined revenue/orders; `avgItemSellingPrice` folds manual qty+revenue into the item average.
+- **No frontend change** — the endpoint shape is unchanged; the client sees one unified number, no Rista-vs-manual split.
+
+**KNOWN LIMITATION (dropdown-only recipes):** orders can ONLY be recorded for dishes that already exist as a `MainRecipe` for the brand. A dish sold but not yet added to MainRecipe cannot be recorded. Accepted for this build — recipes are expected to exist before customers order. (Noted in `OrderEntryView` + `localKitchen.controller.js` comments.)
+
+**Files:** edited `backend/models/order.js`, `backend/models/procurementLog.js`, `backend/controllers/localKitchen.controller.js`, `backend/routes/localKitchen.routes.js`, `backend/controllers/client.controller.js`, `frontend/src/pages/LocalKitchen.jsx`; new `backend/utils/orderCascade.js`.
+
+**Untouched / frozen (verified):** `applyStockCascade` (NOT imported or modified — replicated instead), `bomExpander`, `expandItem`, `brand_stocks`/`purchase_register` schemas + FEFO, recipe schemas, `authMiddleware`, signup/nav/footer; ALL wallet code (`wallet.*`, `WalletPanel.jsx`); POC / Head Chef / Stock Manager dashboards; client analytics FRONTEND (endpoint shape preserved).
+
+## 26. Feature Log — Recipe Import via Excel Template (built, Head Chef)
+
+**What it is:** A one-time-per-brand bulk import of MainRecipes, SubRecipes, and ItemMasters from a standardised `.xlsx` template, used during brand onboarding to seed existing recipes into the ERP instead of hand-entering each one. Lives on the **Head Chef** dashboard (`/head-chef`), gated `requireRole("RECIPE_MANAGER")`; the POC operates it by logging into the Head Chef dashboard during onboarding. New **"Recipe Import"** drawer item placed right after "Recipes". Uses the already-selected workspace brand (no redundant in-view brand dropdown — same brand-first pattern as every other Head Chef view).
+
+**Library:** **`exceljs`** (added to `backend/package.json`). `xlsx`/SheetJS was the originally-named standard but was NOT used — exceljs has a cleaner npm supply-chain posture (no equivalent prototype-pollution/ReDoS advisory) and reads+writes `.xlsx`.
+
+**NO schema changes; existing recipe-creation controllers untouched.** The import builds its OWN write logic using the same field shapes as `MainRecipe` / `SubRecipe` / `itemmasters`. Frozen items verified untouched: `authMiddleware`, `applyStockCascade`, `bomExpander`, `expandItem`, `brand_stocks`/`purchase_register` schemas + FEFO, wallet, signup, nav, footer, and the Main/Sub/ItemMaster schemas.
+
+**Template structure (served on-the-fly, never a committed binary):**
+- **MainRecipes** sheet: `Recipe Name | Item Name | Unit | Quantity`. One row per ingredient or sub-recipe reference; sub-recipe refs prefixed exactly `SR: `.
+- **SubRecipes** sheet: `SubRecipe Name | Item Name | Unit | Quantity | Yield Percent | Batch Yield Qty`. Raw ingredients only (no nested `SR:`).
+- **ItemMasters** sheet (optional): `Item Name | Unit | Shelf Life Days | Min Stock Level | Min Stock Uom`.
+- Plus a `README` sheet documenting the rules. Generated by `buildTemplateWorkbook()` and streamed from `GET /api/head-chef/recipe-import-template` — so the template can never drift from what the parser expects.
+
+**TWO SCHEMA-DRIVEN DECISIONS (founder-confirmed) — these deviate from the original spec:**
+1. **Units restricted to GM / KG / PC only.** `ItemMaster.uom` enum (`KG,GM,PC,NOS,PCS,Pcs`) and `SubRecipe` item `uom` enum (`PC,GM,KG`) do NOT include ML/L, and the schemas are frozen. ML/L on any row is a **blocking error** (clear message telling the user to convert). The original spec listed ML/L — dropped to avoid silent mid-transaction validation failures.
+2. **Added a `Batch Yield Qty` column to the SubRecipes sheet.** The cascade scales a sub-recipe by `requestedQty / SubRecipe.yield` (batch output quantity), but the spec's "Yield Percent" is a cooking-yield % (→ stored on each item's `yield`), NOT a batch size. The new column captures the prepared batch output (entered once per sub-recipe, on the first row) → stored on `SubRecipe.yield`. A missing/zero batch yield is a **blocking error** (without it the cascade math is wrong — the whole reason for the column).
+
+**Identity convention honoured (critical):** per `bomExpander.js`, an item's identity is its **`refId`** — INGREDIENT items get `refId = ingredient name` (what the cascade matches against `brand_stocks.itemName`); SUBRECIPE items get `refId = sub-recipe recipeName`. Names are normalised (trim → collapse whitespace → lowercase) for matching, and the **existing DB casing wins** as the canonical `refId` when an item/sub already exists (so imports never fork casing). **Prices are NOT imported** — every `netPrice` is seeded to 0; FCR pricing stays owned by the POC flow (§17/§18). Item `category` defaults to "Food" (template has no category column).
+
+**Endpoints (`headChef.controller.js` + `headChef.routes.js`, all `requireRole("RECIPE_MANAGER")`):**
+- `GET /recipe-import-template` — streams the generated `.xlsx`.
+- `POST /recipe-import-preview` (multipart, `uploadExcel` middleware) — parses + runs the 3-pass validation with NO DB writes; returns `{ success, brandName, plan:{itemMastersToCreate/AlreadyExist, subRecipesToCreate/Update, mainRecipesToCreate/Update}, warnings[], errors[], confirmationToken }`. Errors block; warnings don't. `confirmationToken` = `sha256(brandName + fileBytes)`, null when there are errors.
+- `POST /recipe-import-commit` (multipart) — requires the matching `confirmationToken` (guards that the committed file is the previewed file), re-runs validation, then writes all 3 passes in **one mongoose transaction** (Pass 1 create new ItemMasters / reuse existing untouched → Pass 2 create-or-update SubRecipes by brand+recipeName → Pass 3 create-or-update MainRecipes). Any failure rolls back the entire import. On success emits `RECIPE_IMPORT_RUN` to `procurement_logs` (best-effort, post-commit) and returns `{ created, updated, log }`.
+
+**3-pass validation (`backend/utils/recipeImport.js`, shared by preview + commit):**
+- **Pass 1 — ItemMasters:** collect every raw-ingredient name + unit from all sheets; reject inconsistent units for the same name (with sheet+row refs) and any non-GM/KG/PC unit; existing ItemMaster (case-insensitive exact name) reused and never modified; new ones queued (uom from sheet; shelfLife/minStock from the optional ItemMasters sheet else null).
+- **Pass 2 — SubRecipes:** group by name; reject `SR:` rows (no nesting), non-positive quantities, out-of-range Yield Percent (1–100, default 100), and missing batch yield; build `items[]` (`type:INGREDIENT, refId:canonicalName, quantity, uom, yield:cookingPct, netPrice:0`); create or **update** (overwrite `items[]` + `yield`) by exact brand+recipeName.
+- **Pass 3 — MainRecipes:** group by name; `SR: ` rows → `type:SUBRECIPE, refId:subRecipeName` (must resolve to a sub created this run OR pre-existing for the brand, else blocking error with recipe+row context); other rows → `type:INGREDIENT`; create or update by exact brand+recipeName.
+- **Error/warning reporting** includes sheet name, 1-indexed Excel row, recipe/sub context, and a human-readable message (e.g. `"MainRecipes row 12 (recipe 'Chicken Roast'): SR 'Roast Masala' not found in SubRecipes sheet…"`).
+
+**Files:** new `backend/utils/recipeImport.js` (parse + 3-pass engine + template builder + token), `backend/middleware/uploadExcel.js` (multer memory, `.xlsx` only, 5MB, clean 400); edited `backend/controllers/headChef.controller.js` (+3 handlers), `backend/routes/headChef.routes.js` (+3 routes), `backend/models/procurementLog.js` (+`RECIPE_IMPORT_RUN`), `backend/package.json` (+`exceljs`); edited `frontend/src/pages/HeadChef.jsx` (+"Recipe Import" drawer item + `RecipeImportView`: template download, `.xlsx` picker ≤5MB, preview plan/warnings/errors, error-gated green Confirm Import, reminder banner).
+
+**Scope guard:** all endpoints RECIPE_MANAGER-gated; brand validated to exist as a client `User` (`resolveBrandUser`) before any read/write; 5MB cap; memory storage (no disk write); full transaction rollback on commit failure.
+
+**Deferred (still not built):** the Word-SOP → Excel AI extraction step (stage 1 of the original two-stage conversion) — this build covers Excel → DB only.
 
 ## graphify
 

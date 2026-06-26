@@ -41,6 +41,11 @@ const procurementLogSchema = new mongoose.Schema(
         // ── Wallet → Razorpay-direct redesign (CLAUDE.md §24) ──────────────
         "PROCUREMENT_INVOICE_RAISED", // Stock Manager raised a procurement invoice
         "GRN_RECEIVED_UPDATED",       // Stock Manager entered final received qty/price on a GRN
+        // ── Manual Local-Kitchen Order Entry (CLAUDE.md §25) ───────────────
+        "ORDER_INGESTED",             // Local Kitchen recorded a manual order (cascade fired)
+        "ORDER_REVERSED",             // Local Kitchen deleted a manual order within 30 min (cascade reversed)
+        // ── Recipe Import (Head Chef bulk onboarding, CLAUDE.md §26) ───────
+        "RECIPE_IMPORT_RUN",          // Head Chef committed a bulk recipe import for a brand
       ],
       required: true,
       index: true,

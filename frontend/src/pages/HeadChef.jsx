@@ -38,6 +38,7 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 
 const WORKSPACE_ITEMS = [
   { key: "recipes", label: "Recipes (Main + Sub)" },
+  { key: "import", label: "Recipe Import" },
   { key: "trials", label: "Trials (T1/T2/T3)" },
   { key: "training", label: "Training (TR1/TR2/TR3)" },
   { key: "promote", label: "Promote to Final" },
@@ -168,6 +169,7 @@ export default function HeadChef() {
             <main className="flex-1 p-6 max-w-6xl">
               <h2 className="text-xl font-bold mb-4">{selected.brandName}</h2>
               {activeView === "recipes" && <RecipesView brandName={selected.brandName} />}
+              {activeView === "import" && <RecipeImportView brandName={selected.brandName} />}
               {activeView === "trials" && <IterationsInfoView phase="TRIAL" />}
               {activeView === "training" && <IterationsInfoView phase="TRAINING" />}
               {activeView === "promote" && <PromoteView brandName={selected.brandName} />}
@@ -298,6 +300,190 @@ function RecipesView({ brandName }) {
         </div>
       </Card>
     </>
+  );
+}
+
+/* ============================================================
+ * 1b. RECIPE IMPORT (bulk onboarding via Excel template) — CLAUDE.md §26
+ * ========================================================== */
+function RecipeImportView({ brandName }) {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(null); // { plan, warnings, errors, confirmationToken }
+  const [committing, setCommitting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const onFileChange = (e) => {
+    const f = e.target.files?.[0];
+    setPreview(null);
+    setResult(null);
+    if (!f) return;
+    if (!/\.xlsx$/i.test(f.name)) {
+      toast.error("Please choose an .xlsx file");
+      e.target.value = "";
+      setFile(null);
+      return;
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      toast.error("File is too large (max 5MB)");
+      e.target.value = "";
+      setFile(null);
+      return;
+    }
+    setFile(f);
+  };
+
+  const downloadTemplate = async () => {
+    try {
+      const res = await api.get("/api/head-chef/recipe-import-template", { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "recipe_import_template.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(errMsg(e, "Failed to download template"));
+    }
+  };
+
+  const runPreview = async () => {
+    if (!file) return toast.error("Choose an .xlsx file first");
+    setBusy(true);
+    setResult(null);
+    try {
+      const form = new FormData();
+      form.append("brandName", brandName);
+      form.append("file", file);
+      const res = await api.post("/api/head-chef/recipe-import-preview", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setPreview(res.data);
+      if (res.data.errors?.length) toast.error(`Preview found ${res.data.errors.length} blocking error(s)`);
+      else toast.success("Preview ready — review and confirm");
+    } catch (e) {
+      toast.error(errMsg(e, "Preview failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const commit = async () => {
+    if (!file || !preview?.confirmationToken) return;
+    setCommitting(true);
+    try {
+      const form = new FormData();
+      form.append("brandName", brandName);
+      form.append("file", file);
+      form.append("confirmationToken", preview.confirmationToken);
+      const res = await api.post("/api/head-chef/recipe-import-commit", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const c = res.data.created || {};
+      setResult(res.data);
+      setPreview(null);
+      setFile(null);
+      toast.success(`Import successful: ${c.itemMasters || 0} ItemMasters, ${c.subRecipes || 0} SubRecipes, ${c.mainRecipes || 0} MainRecipes created`);
+    } catch (e) {
+      const errs = e?.response?.data?.errors;
+      if (Array.isArray(errs) && errs.length) {
+        toast.error("Import rejected — fix the errors and preview again");
+        setPreview((p) => (p ? { ...p, errors: errs, confirmationToken: null } : p));
+      } else {
+        toast.error(errMsg(e, "Import failed and was rolled back"));
+      }
+    } finally {
+      setCommitting(false);
+    }
+  };
+
+  const plan = preview?.plan;
+  const hasErrors = (preview?.errors?.length || 0) > 0;
+
+  return (
+    <>
+      <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-4 mb-5 text-sm">
+        After import, verify the recipes in the <span className="font-semibold">Recipes</span> tab. Once imported,
+        the BOM drives all stock cascades — incorrect data here causes cascading stock errors. Units must be
+        GM, KG or PC. Sub-recipe references in MainRecipes use the <span className="font-mono">SR: </span> prefix.
+        Prices are not imported (FCR pricing is entered later by the POC).
+      </div>
+
+      <Card title="Recipe Import" right={<span className="text-sm text-gray-500">Brand: <span className="font-semibold text-gray-800">{brandName}</span></span>}>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <button className={btnGhost} onClick={downloadTemplate}>Download Excel Template</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-center">
+          <input type="file" accept=".xlsx" onChange={onFileChange} className={`${inputCls} py-1.5`} />
+          <button className={btn} onClick={runPreview} disabled={busy || !file}>
+            {busy ? "Checking…" : "Preview"}
+          </button>
+        </div>
+        {file && <p className="text-xs text-gray-600 mt-2">{file.name} — {(file.size / 1024).toFixed(0)} KB</p>}
+      </Card>
+
+      {preview && (
+        <Card title="Preview">
+          {plan && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+              <PlanStat label="ItemMasters — new" value={plan.itemMastersToCreate} />
+              <PlanStat label="ItemMasters — exist" value={plan.itemMastersAlreadyExist} muted />
+              <PlanStat label="SubRecipes — new" value={plan.subRecipesToCreate} />
+              <PlanStat label="SubRecipes — update" value={plan.subRecipesToUpdate} muted />
+              <PlanStat label="MainRecipes — new" value={plan.mainRecipesToCreate} />
+              <PlanStat label="MainRecipes — update" value={plan.mainRecipesToUpdate} muted />
+            </div>
+          )}
+
+          {hasErrors && (
+            <div className="mb-4">
+              <p className="text-sm font-semibold text-red-700 mb-1">{preview.errors.length} blocking error(s) — fix and preview again:</p>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-red-700">
+                {preview.errors.map((er, i) => <li key={i}>{er}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {preview.warnings?.length > 0 && (
+            <div className="mb-4">
+              <p className="text-sm font-semibold text-amber-700 mb-1">Warnings (non-blocking):</p>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-amber-700">
+                {preview.warnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+          )}
+
+          <button
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={commit}
+            disabled={hasErrors || committing || !preview.confirmationToken}
+          >
+            {committing ? "Importing…" : "Confirm Import"}
+          </button>
+          {hasErrors && <span className="ml-3 text-xs text-gray-500">Resolve all errors to enable import.</span>}
+        </Card>
+      )}
+
+      {result && (
+        <Card title="Import complete">
+          <ul className="text-sm text-gray-700 space-y-1">
+            {(result.log || []).map((l, i) => <li key={i}>{l}</li>)}
+          </ul>
+          <p className="text-xs text-gray-500 mt-3">Open the Recipes tab to verify the imported recipes.</p>
+        </Card>
+      )}
+    </>
+  );
+}
+
+function PlanStat({ label, value, muted }) {
+  return (
+    <div className={`rounded-xl border p-3 ${muted ? "border-gray-200 bg-gray-50" : "border-gray-300 bg-white"}`}>
+      <div className={`text-2xl font-bold ${muted ? "text-gray-500" : "text-gray-900"}`}>{value ?? 0}</div>
+      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+    </div>
   );
 }
 

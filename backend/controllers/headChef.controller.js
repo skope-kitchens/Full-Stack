@@ -42,6 +42,12 @@ import { getDishIterations } from "../utils/iterationFcr.js";
 import { emitProcurementLog } from "../utils/procurementLog.js";
 import { buildAuditItems, reconcileAuditToLedger, normalizeAuditDate } from "../utils/producerAudit.js";
 import { ristaClient } from "../ristaClient.js";
+import {
+  buildTemplateWorkbook,
+  parseWorkbook,
+  validateImport,
+  importToken,
+} from "../utils/recipeImport.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BASE_BRANCH = "JPNAGAR"; // base kitchen in B2C (default when no branch on JWT)
@@ -1022,5 +1028,159 @@ export async function getProjections(req, res) {
   } catch (err) {
     console.error("[HeadChef] getProjections error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load projections" });
+  }
+}
+
+/* ============================================================
+ * 15. Recipe Import (bulk onboarding via Excel template) — CLAUDE.md §26
+ *
+ * Three handlers: serve the template, dry-run preview (no writes), and a
+ * transactional commit. The heavy parse + 3-pass validation lives in
+ * utils/recipeImport.js and is shared by preview + commit so what is previewed
+ * is exactly what is written. Existing recipe-creation controllers and the
+ * Main/Sub/ItemMaster schemas are NOT touched — this builds its own write logic
+ * using the same field shapes.
+ * ========================================================== */
+
+// GET /api/head-chef/recipe-import-template — stream the .xlsx template.
+export async function getRecipeImportTemplate(req, res) {
+  try {
+    const buffer = await buildTemplateWorkbook();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="recipe_import_template.xlsx"');
+    return res.send(buffer);
+  } catch (err) {
+    console.error("[HeadChef] getRecipeImportTemplate error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to generate template" });
+  }
+}
+
+// POST /api/head-chef/recipe-import-preview — parse + validate, no DB writes.
+export async function postRecipeImportPreview(req, res) {
+  try {
+    const brandName = String(req.body?.brandName || "").trim();
+    if (!brandName) return res.status(400).json({ message: "brandName is required" });
+    if (!req.file?.buffer?.length) return res.status(400).json({ message: "No Excel file uploaded" });
+
+    const brand = await resolveBrandUser(brandName);
+    if (!brand) return res.status(404).json({ message: "No client record for this brand" });
+
+    let parsed;
+    try {
+      parsed = await parseWorkbook(req.file.buffer);
+    } catch (e) {
+      return res.status(400).json({ message: "Could not read the Excel file. Re-download the template and try again." });
+    }
+
+    const { plan, warnings, errors } = await validateImport({ brandName: brand.brandName, parsed });
+    const confirmationToken = errors.length === 0 ? importToken(brand.brandName, req.file.buffer) : null;
+
+    return res.json({
+      success: errors.length === 0,
+      brandName: brand.brandName,
+      plan,
+      warnings,
+      errors,
+      confirmationToken,
+    });
+  } catch (err) {
+    console.error("[HeadChef] postRecipeImportPreview error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to preview import" });
+  }
+}
+
+// POST /api/head-chef/recipe-import-commit — re-validate, then write in a txn.
+export async function postRecipeImportCommit(req, res) {
+  try {
+    const brandName = String(req.body?.brandName || "").trim();
+    const confirmationToken = String(req.body?.confirmationToken || "").trim();
+    if (!brandName) return res.status(400).json({ message: "brandName is required" });
+    if (!confirmationToken) return res.status(400).json({ message: "confirmationToken is required — run Preview first" });
+    if (!req.file?.buffer?.length) return res.status(400).json({ message: "No Excel file uploaded" });
+
+    const brand = await resolveBrandUser(brandName);
+    if (!brand) return res.status(404).json({ message: "No client record for this brand" });
+
+    // Guard: the committed file must be the previewed file.
+    if (importToken(brand.brandName, req.file.buffer) !== confirmationToken) {
+      return res.status(400).json({ message: "The file changed since Preview. Please run Preview again." });
+    }
+
+    let parsed;
+    try {
+      parsed = await parseWorkbook(req.file.buffer);
+    } catch (e) {
+      return res.status(400).json({ message: "Could not read the Excel file. Re-download the template and try again." });
+    }
+
+    const { errors, normalized } = await validateImport({ brandName: brand.brandName, parsed });
+    if (errors.length || !normalized) {
+      return res.status(400).json({ message: "Import has blocking errors — fix them and preview again.", errors });
+    }
+
+    const created = { itemMasters: 0, subRecipes: 0, mainRecipes: 0 };
+    const updated = { subRecipes: 0, mainRecipes: 0 };
+
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // Pass 1 — new ItemMasters (existing reused untouched).
+        if (normalized.itemMastersToCreate.length) {
+          await ItemMaster.create(
+            normalized.itemMastersToCreate.map((i) => ({
+              itemName: i.itemName,
+              uom: i.uom,
+              shelfLifeDays: i.shelfLifeDays,
+              minStockLevel: i.minStockLevel,
+              minStockUom: i.minStockUom,
+            })),
+            { session, ordered: true }
+          );
+          created.itemMasters = normalized.itemMastersToCreate.length;
+        }
+
+        // Pass 2 — SubRecipes (create or overwrite items[] + batch yield).
+        for (const s of normalized.subRecipesToCreate) {
+          await SubRecipe.create([{ brand: brand.brandName, recipeName: s.recipeName, yield: s.yield, items: s.items }], { session });
+          created.subRecipes += 1;
+        }
+        for (const s of normalized.subRecipesToUpdate) {
+          await SubRecipe.updateOne({ _id: s._id }, { $set: { yield: s.yield, items: s.items } }, { session });
+          updated.subRecipes += 1;
+        }
+
+        // Pass 3 — MainRecipes (create or overwrite items[]).
+        for (const m of normalized.mainRecipesToCreate) {
+          await MainRecipe.create([{ brand: brand.brandName, recipeName: m.recipeName, items: m.items }], { session });
+          created.mainRecipes += 1;
+        }
+        for (const m of normalized.mainRecipesToUpdate) {
+          await MainRecipe.updateOne({ _id: m._id }, { $set: { items: m.items } }, { session });
+          updated.mainRecipes += 1;
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    // Best-effort analyst log (post-commit; never blocks the response).
+    emitProcurementLog({
+      eventType: "RECIPE_IMPORT_RUN",
+      req,
+      brandName: brand.brandName,
+      refId: brand._id,
+      refCollection: "main_recipes",
+      metadata: { created, updated },
+    });
+
+    const log = [
+      `ItemMasters created: ${created.itemMasters}`,
+      `SubRecipes created: ${created.subRecipes}, updated: ${updated.subRecipes}`,
+      `MainRecipes created: ${created.mainRecipes}, updated: ${updated.mainRecipes}`,
+    ];
+    return res.json({ success: true, brandName: brand.brandName, created, updated, log });
+  } catch (err) {
+    console.error("[HeadChef] postRecipeImportCommit error:", err?.message || err);
+    return res.status(500).json({ message: "Import failed and was rolled back. No changes were saved." });
   }
 }

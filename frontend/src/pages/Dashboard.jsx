@@ -27,6 +27,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const DRAWER_ITEMS = [
   { key: "onboarding", label: "Service Onboarding Status" },
+  { key: "sop", label: "SOP Documents" },
   { key: "projections", label: "Enter Projections", gate: "LIVE" },
   { key: "dailyStock", label: "Daily Stock" },
   { key: "auditHistory", label: "Audit History", gate: "LIVE" },
@@ -107,7 +108,7 @@ export default function Dashboard() {
 
   // Logo popup
   const [showLogoModal, setShowLogoModal] = useState(false);
-  const [logoInput, setLogoInput] = useState("");
+  const [logoFile, setLogoFile] = useState(null);
   const [logoSaving, setLogoSaving] = useState(false);
 
   const lifecycleStage = profile?.lifecycleStage || "AWAITING_MENU";
@@ -246,18 +247,47 @@ export default function Dashboard() {
     }
   };
 
-  /* ---------------- Logo save ---------------- */
+  /* ---------------- Logo file select + validate ---------------- */
+  const LOGO_ALLOWED_TYPES = ["image/png", "image/jpeg", "image/svg+xml"]; // PNG/JPG/JPEG/SVG
+  const LOGO_MAX_BYTES = 2 * 1024 * 1024; // 2MB
+
+  const onLogoFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!LOGO_ALLOWED_TYPES.includes(file.type)) {
+      toast.error("Only PNG, JPG, JPEG or SVG files are allowed");
+      e.target.value = "";
+      setLogoFile(null);
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      toast.error("Logo file is too large (max 2MB)");
+      e.target.value = "";
+      setLogoFile(null);
+      return;
+    }
+    setLogoFile(file);
+  };
+
+  /* ---------------- Logo upload + save ---------------- */
   const saveLogo = async () => {
-    if (!logoInput.trim()) {
-      toast.error("Paste an image URL");
+    if (!logoFile) {
+      toast.error("Choose a logo file");
       return;
     }
     try {
       setLogoSaving(true);
-      const res = await api.patch("/api/client/logo", { logoUrl: logoInput.trim() });
+      // 1. Upload the file to Cloudinary via the backend.
+      const form = new FormData();
+      form.append("file", logoFile);
+      const up = await api.post("/api/client/logo-upload", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      // 2. Persist the returned secure URL on the User record.
+      const res = await api.patch("/api/client/logo", { logoUrl: up.data.logoUrl });
       setProfile((p) => ({ ...p, logoUrl: res.data.logoUrl }));
       setShowLogoModal(false);
-      setLogoInput("");
+      setLogoFile(null);
       toast.success("Logo updated");
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to update logo");
@@ -405,6 +435,8 @@ export default function Dashboard() {
 
             {activeView === "onboarding" && <OnboardingView />}
 
+            {activeView === "sop" && <SopView />}
+
             {activeView === "projections" &&
               (isLive ? (
                 <LockedNotice message="Redirecting to projections…" />
@@ -451,24 +483,36 @@ export default function Dashboard() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl w-96 space-y-4">
             <h2 className="text-xl font-bold">Change Logo</h2>
-            <p className="text-sm text-gray-500">Paste an image URL — we'll host it for you.</p>
+            <p className="text-sm text-gray-500">
+              Choose a logo from your device. PNG, JPG, JPEG or SVG — max 2MB.
+            </p>
             <input
-              type="text"
-              placeholder="https://…/logo.png"
-              value={logoInput}
-              onChange={(e) => setLogoInput(e.target.value)}
-              className="w-full border p-2 rounded"
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml"
+              onChange={onLogoFileChange}
+              className="w-full border p-2 rounded text-sm"
             />
+            {logoFile && (
+              <p className="text-xs text-gray-600">
+                {logoFile.name} — {(logoFile.size / 1024).toFixed(0)} KB
+              </p>
+            )}
             <div className="flex gap-2">
-              <button onClick={() => setShowLogoModal(false)} className="flex-1 border py-2 rounded">
+              <button
+                onClick={() => {
+                  setShowLogoModal(false);
+                  setLogoFile(null);
+                }}
+                className="flex-1 border py-2 rounded"
+              >
                 Cancel
               </button>
               <button
                 onClick={saveLogo}
-                disabled={logoSaving}
+                disabled={logoSaving || !logoFile}
                 className="flex-1 bg-black text-white py-2 rounded disabled:opacity-50"
               >
-                {logoSaving ? "Saving…" : "Save"}
+                {logoSaving ? "Uploading…" : "Save"}
               </button>
             </div>
           </div>
@@ -752,6 +796,49 @@ function OnboardingView() {
             >
               {t.status === "COMPLETED" ? "Completed" : "Pending"}
             </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ============================================================
+ * SOP DOCUMENTS VIEW (read-only)
+ * The POC enters these (title + link) via the POC dashboard; the client reads
+ * back their own list here. No lifecycle gate, no add/edit/delete — read-only.
+ * ========================================================== */
+function SopView() {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .get("/api/client/sop")
+      .then((res) => setDocuments(res.data?.documents || []))
+      .catch(() => setDocuments([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-6">
+      <h2 className="text-2xl font-semibold">SOP Documents</h2>
+      {loading && <p className="text-gray-500">Loading…</p>}
+      {!loading && documents.length === 0 && (
+        <p className="text-gray-500">Your SOPs will appear here as your POC finalises them.</p>
+      )}
+      <div className="space-y-3">
+        {documents.map((doc, idx) => (
+          <div key={idx} className="flex items-center justify-between border rounded-lg p-4">
+            <p className="font-semibold">{doc.title}</p>
+            <a
+              href={doc.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 underline text-sm font-medium"
+            >
+              Open SOP
+            </a>
           </div>
         ))}
       </div>

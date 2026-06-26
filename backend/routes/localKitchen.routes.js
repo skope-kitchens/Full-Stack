@@ -20,6 +20,10 @@ import {
   getMenu,
   getProjections,
   getFcr,
+  getRecipesForOrders,
+  postOrder,
+  getOrders,
+  deleteOrder,
 } from "../controllers/localKitchen.controller.js";
 
 const router = express.Router();
@@ -44,7 +48,13 @@ router.patch("/audit/:brandName/lock", ...guard, lockAudit);
 router.post("/indent", ...guard, postIndent);
 router.get("/indents", ...guard, getIndents);
 
-// 6. Read-only views
+// 6. Manual Order Entry (CLAUDE.md §25)
+router.get("/recipes-for-orders", ...guard, getRecipesForOrders);
+router.post("/orders", ...guard, postOrder);
+router.get("/orders", ...guard, getOrders);
+router.delete("/orders/:orderId", ...guard, deleteOrder);
+
+// 7. Read-only views
 router.get("/recipes/:brandName", ...guard, getRecipes);
 router.get("/menu/:brandName", ...guard, getMenu);
 router.get("/projections/:brandName", ...guard, getProjections);

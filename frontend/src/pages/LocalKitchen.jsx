@@ -28,6 +28,7 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const WORKSPACE_ITEMS = [
   { key: "dispatches", label: "Incoming Dispatches" },
   { key: "stock", label: "Local Stock" },
+  { key: "orders", label: "Order Entry" },
   { key: "audit", label: "Closing Stock Audit" },
   { key: "replenish", label: "Request Replenishment" },
   { key: "recipes", label: "Recipes" },
@@ -129,6 +130,7 @@ export default function LocalKitchen() {
               <h2 className="text-xl font-bold mb-4">{selectedBrand}</h2>
               {activeView === "dispatches" && <DispatchesView brandName={selectedBrand} />}
               {activeView === "stock" && <StockView brandName={selectedBrand} />}
+              {activeView === "orders" && <OrderEntryView brandName={selectedBrand} />}
               {activeView === "audit" && <AuditView brandName={selectedBrand} />}
               {activeView === "replenish" && <ReplenishView brandName={selectedBrand} />}
               {activeView === "recipes" && <RecipesView brandName={selectedBrand} />}
@@ -291,6 +293,236 @@ function StockView({ brandName }) {
         </table>
       )}
     </Card>
+  );
+}
+
+/* ============================================================ 2b. ORDER ENTRY (§25) */
+const ORDER_SOURCE_OPTS = [
+  ["WALK_IN", "Walk-in"], ["SWIGGY", "Swiggy"], ["ZOMATO", "Zomato"], ["OWNLY", "Ownly"], ["OTHER", "Other"],
+];
+const ORDER_BUCKET_OPTS = [
+  ["MORNING", "Morning"], ["AFTERNOON", "Afternoon"], ["EVENING", "Evening"], ["LATE_NIGHT", "Late Night"],
+];
+const bucketLabel = (k) => (ORDER_BUCKET_OPTS.find(([v]) => v === k) || [k, k])[1];
+const autoBucket = () => {
+  const h = new Date().getHours();
+  if (h < 11) return "MORNING";
+  if (h < 16) return "AFTERNOON";
+  if (h < 21) return "EVENING";
+  return "LATE_NIGHT";
+};
+const minOrderDate = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return d.toISOString().slice(0, 10);
+};
+const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+// NOTE (dropdown-only limitation): orders can ONLY be recorded for dishes that
+// exist as a MainRecipe for this brand. A dish not yet added to MainRecipe cannot
+// be recorded here — accepted limitation for this build (recipes precede orders).
+function OrderEntryView({ brandName }) {
+  const [dishes, setDishes] = useState([]);
+  const [recipeId, setRecipeId] = useState("");
+  const [qty, setQty] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [source, setSource] = useState("WALK_IN");
+  const [timeBucket, setTimeBucket] = useState(autoBucket());
+  const [orderDate, setOrderDate] = useState(today());
+  const [busy, setBusy] = useState(false);
+
+  // Soft-block override flow
+  const [blocked, setBlocked] = useState(null); // { items: [...] }
+  const [overrideReason, setOverrideReason] = useState("");
+
+  // Today's view
+  const [summary, setSummary] = useState({ totalOrders: 0, totalRevenue: 0 });
+  const [groups, setGroups] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+
+  const loadDishes = useCallback(async () => {
+    try {
+      const res = await api.get("/api/local-kitchen/recipes-for-orders", { params: { brandName } });
+      setDishes(res.data?.data || []);
+    } catch (e) { toast.error(errMsg(e, "Failed to load dishes")); }
+  }, [brandName]);
+
+  const loadOrders = useCallback(async () => {
+    try {
+      const res = await api.get("/api/local-kitchen/orders", { params: { brandName, date: orderDate } });
+      setSummary(res.data?.summary || { totalOrders: 0, totalRevenue: 0 });
+      setGroups(res.data?.data || []);
+    } catch (e) { toast.error(errMsg(e, "Failed to load orders")); }
+  }, [brandName, orderDate]);
+
+  useEffect(() => { loadDishes(); }, [loadDishes]);
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  const resetForm = () => {
+    setRecipeId(""); setQty(""); setUnitPrice("");
+    setSource("WALK_IN"); setTimeBucket(autoBucket());
+  };
+
+  const submit = async ({ override = false, reason = "" } = {}) => {
+    if (!recipeId) return toast.error("Pick a dish");
+    const qtyNum = Number(qty);
+    if (!Number.isInteger(qtyNum) || qtyNum < 1) return toast.error("Qty must be a whole number ≥ 1");
+    const priceNum = Number(unitPrice);
+    if (!Number.isFinite(priceNum) || priceNum < 0) return toast.error("Unit price must be 0 or more");
+
+    setBusy(true);
+    try {
+      await api.post("/api/local-kitchen/orders", {
+        brandName, recipeId, qty: qtyNum, unitPrice: priceNum,
+        source, timeBucket, orderDate,
+        ...(override ? { override: true, overrideReason: reason } : {}),
+      });
+      toast.success("Order recorded");
+      setBlocked(null); setOverrideReason("");
+      resetForm();
+      loadOrders();
+    } catch (e) {
+      if (e?.response?.status === 409 && e?.response?.data?.blocked) {
+        // Soft block — show the override modal with the insufficient list.
+        setBlocked({ items: e.response.data.items || [] });
+      } else {
+        toast.error(errMsg(e, "Failed to record order"));
+      }
+    } finally { setBusy(false); }
+  };
+
+  const confirmOverride = () => {
+    if (!overrideReason.trim()) return toast.error("A reason is required to override");
+    submit({ override: true, reason: overrideReason.trim() });
+  };
+
+  const deleteEntry = async (id) => {
+    try {
+      await api.delete(`/api/local-kitchen/orders/${id}`);
+      toast.success("Order deleted");
+      loadOrders();
+    } catch (e) { toast.error(errMsg(e, "Failed to delete order")); }
+  };
+
+  const within30 = (enteredAt) =>
+    enteredAt && (Date.now() - new Date(enteredAt).getTime()) / 60000 <= 30;
+
+  return (
+    <>
+      <Card title="Record an order">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Dish</label>
+            <select className={inputCls} value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
+              <option value="">Select a dish…</option>
+              {dishes.map((d) => <option key={d.recipeId} value={d.recipeId}>{d.recipeName}</option>)}
+            </select>
+            {dishes.length === 0 && <p className="text-xs text-amber-600 mt-1">No dishes yet — add a recipe for this brand first.</p>}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Quantity</label>
+            <input className={inputCls} type="number" min="1" step="1" placeholder="e.g. 3" value={qty} onChange={(e) => setQty(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Unit price (₹ per dish)</label>
+            <input className={inputCls} type="number" min="0" step="0.01" placeholder="e.g. 250" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Source</label>
+            <select className={inputCls} value={source} onChange={(e) => setSource(e.target.value)}>
+              {ORDER_SOURCE_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Time bucket</label>
+            <select className={inputCls} value={timeBucket} onChange={(e) => setTimeBucket(e.target.value)}>
+              {ORDER_BUCKET_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Date</label>
+            <input className={inputCls} type="date" value={orderDate} min={minOrderDate()} max={today()} onChange={(e) => setOrderDate(e.target.value)} />
+          </div>
+        </div>
+        {qty && unitPrice && (
+          <p className="text-sm text-gray-600 mt-3">Total: <span className="font-semibold">{inr(Number(qty) * Number(unitPrice))}</span> ({qty} × {inr(unitPrice)})</p>
+        )}
+        <div className="mt-3">
+          <button className={btn} disabled={busy} onClick={() => submit()}>{busy ? "Saving…" : "Record order"}</button>
+        </div>
+      </Card>
+
+      <Card title={`Orders for ${fmtDate(orderDate)}`} right={<button className={btnGhost} onClick={loadOrders}>Refresh</button>}>
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 flex gap-8">
+          <div><div className="text-xs text-gray-500">Orders</div><div className="text-2xl font-bold">{summary.totalOrders}</div></div>
+          <div><div className="text-xs text-gray-500">Revenue</div><div className="text-2xl font-bold">{inr(summary.totalRevenue)}</div></div>
+        </div>
+        {groups.length === 0 ? emptyP("No orders recorded for this date.") : (
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-gray-500 border-b">
+              <th className="py-2 pr-2">Dish</th>
+              {ORDER_BUCKET_OPTS.map(([v, l]) => <th key={v} className="py-2 pr-2 text-right">{l}</th>)}
+              <th className="py-2 pr-2 text-right">Total qty</th>
+              <th className="py-2 pr-2 text-right">Revenue</th>
+            </tr></thead>
+            <tbody>
+              {groups.map((g) => {
+                const key = String(g.recipeId || g.recipeName);
+                const isOpen = expanded === key;
+                return (
+                  <React.Fragment key={key}>
+                    <tr className="border-b border-gray-100 cursor-pointer hover:bg-gray-50" onClick={() => setExpanded(isOpen ? null : key)}>
+                      <td className="py-2 pr-2 font-medium">{isOpen ? "▾ " : "▸ "}{g.recipeName}</td>
+                      {ORDER_BUCKET_OPTS.map(([v]) => <td key={v} className="py-2 pr-2 text-right">{g.bucketBreakdown?.[v]?.qty || 0}</td>)}
+                      <td className="py-2 pr-2 text-right font-semibold">{g.totalQty}</td>
+                      <td className="py-2 pr-2 text-right">{inr(g.totalRevenue)}</td>
+                    </tr>
+                    {isOpen && (g.entries || []).map((en) => (
+                      <tr key={en._id} className="border-b border-gray-50 bg-gray-50 text-xs">
+                        <td className="py-1.5 pr-2 pl-6 text-gray-600">
+                          {bucketLabel(en.timeBucket)} · {en.source} · {new Date(en.enteredAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                          {!en.cascadeApplied && <span className={pill("bg-amber-100 text-amber-800") + " ml-2"}>override</span>}
+                        </td>
+                        <td colSpan={ORDER_BUCKET_OPTS.length} className="py-1.5 pr-2 text-right text-gray-600">{en.qty} × {inr(en.unitPrice)}</td>
+                        <td className="py-1.5 pr-2 text-right">{inr(en.totalAmount)}</td>
+                        <td className="py-1.5 pr-2 text-right">
+                          {within30(en.enteredAt) && (
+                            <button className="text-red-600 hover:underline" onClick={(e) => { e.stopPropagation(); deleteEntry(en._id); }}>Delete</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      {blocked && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Not enough stock</h3>
+            <p className="text-sm text-gray-600 mb-3">Recording this order will make these ingredients go negative:</p>
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-4 max-h-48 overflow-auto">
+              {blocked.items.map((it, i) => (
+                <div key={i} className="px-3 py-2 text-sm flex justify-between">
+                  <span className="font-medium">{it.itemName}</span>
+                  <span className="text-gray-600">have {it.currentQty} {it.uom}, need {it.requiredQty} {it.uom} (short {it.shortfall} {it.uom})</span>
+                </div>
+              ))}
+            </div>
+            <label className="block text-xs text-gray-500 mb-1">Override reason (required)</label>
+            <input className={inputCls} placeholder="e.g. stock audit pending, customer already served" value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} />
+            <div className="flex justify-end gap-2 mt-4">
+              <button className={btnGhost} onClick={() => { setBlocked(null); setOverrideReason(""); }}>Cancel</button>
+              <button className={btn} disabled={busy} onClick={confirmOverride}>{busy ? "Saving…" : "Override & record"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -1356,9 +1356,6 @@ function InvoicingView({ clientId, client }) {
               <option value="ONBOARDING">Onboarding</option>
               <option value="PROCUREMENT">Procurement</option>
               <option value="SUBSCRIPTION">Subscription</option>
-              <option value="PRODUCTION" disabled>
-                Production (raised by system)
-              </option>
               <option value="REIMBURSEMENT">Reimbursement</option>
             </select>
           </div>
