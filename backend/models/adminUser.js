@@ -29,7 +29,7 @@ const adminUserSchema = new mongoose.Schema(
     role: {
       type: String,
       // LOCAL_KITCHEN — operator at a normal/local kitchen (Marathahalli, Kalyan
-      // Nagar, or JP Nagar's own assembly op). Branch-scoped via branchCode below.
+      // Nagar, Jayanagar, or JP Nagar's own assembly op). Branch-scoped via branchCode below.
       enum: ["WALLET_MANAGER", "RECIPE_MANAGER", "INGREDIENT_MANAGER", "POC", "LOCAL_KITCHEN"],
       required: true,
       index: true,
@@ -60,8 +60,8 @@ const adminUserSchema = new mongoose.Schema(
       index: true,
     },
     // The kitchen branches this warehouse supplies (a warehouse can serve
-    // multiple kitchens, e.g. JP Nagar warehouse supplies Marathahalli and
-    // Kalyan Nagar too). Used by Ingredient Managers.
+    // multiple kitchens, e.g. JP Nagar warehouse supplies Marathahalli,
+    // Kalyan Nagar and Jayanagar too). Used by Ingredient Managers.
     branchCodes: {
       type: [String],
       default: [],

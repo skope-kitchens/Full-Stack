@@ -12,6 +12,7 @@ const BRANCH_OPTIONS = [
   { label: "JP Nagar", value: "JPNAGAR" },
   { label: "Marathahalli", value: "MARATHAHALLI" },
   { label: "Kalyan Nagar", value: "KALYANNAGAR" },
+  { label: "Jayanagar", value: "JAYANAGAR" },
   { label: "Test Branch", value: "TESTBRANCH" },
 ];
 

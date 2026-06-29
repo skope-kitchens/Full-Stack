@@ -2,8 +2,8 @@ import mongoose from "mongoose";
 
 /**
  * subrecipe_dispatches — movement of finished sub-recipes from the base kitchen
- * (JP Nagar) to the local/normal kitchens (Marathahalli, Kalyan Nagar, JP Nagar
- * assembly).
+ * (JP Nagar) to the local/normal kitchens (Marathahalli, Kalyan Nagar, Jayanagar,
+ * JP Nagar assembly).
  *
  * LIFECYCLE (QC-style, mirrors GRN: stock is only credited on receipt):
  *   REQUESTED   → a local kitchen asked for this sub-recipe (initial state when a

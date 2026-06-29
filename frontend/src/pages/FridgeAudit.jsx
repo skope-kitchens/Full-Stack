@@ -87,6 +87,7 @@ const FridgeAudit = () => {
       JPNAGAR: "JP Nagar",
       MARATHAHALLI: "Marathahalli",
       KALYANNAGAR: "Kalyan Nagar",
+      JAYANAGAR: "Jayanagar",
       TESTBRANCH: "Test Branch",
     };
     return overrides[code] || code;
