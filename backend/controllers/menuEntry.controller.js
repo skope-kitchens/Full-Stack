@@ -38,6 +38,18 @@ export const createMenuEntry = async (req, res) => {
       isSeenByRecipeAdmin: false,
     });
 
+    // Lifecycle: the first menu submission moves the client out of AWAITING_MENU
+    // into IN_TRIAL. Only flips when currently AWAITING_MENU (idempotent, safe to
+    // re-submit). Best-effort — never blocks the menu save.
+    try {
+      await User.updateOne(
+        { _id: req.user._id, lifecycleStage: "AWAITING_MENU" },
+        { $set: { lifecycleStage: "IN_TRIAL" } }
+      );
+    } catch (lifecycleErr) {
+      console.error("Lifecycle flip on menu submit failed:", lifecycleErr?.message || lifecycleErr);
+    }
+
     return res.status(201).json({ success: true, data: entry });
   } catch (err) {
     console.error("Create menu entry error:", err?.message || err);

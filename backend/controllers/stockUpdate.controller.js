@@ -43,8 +43,11 @@ export async function upsertStockUpdate(req, res) {
       return res.status(400).json({ message: "At least one valid item is required" });
     }
 
+    // Pin to correctionSeq 0 (the primary daily record). The unique index is now
+    // { brandId, date, correctionSeq }, so omitting it could match a Stock Manager
+    // correction record (seq 1+) — pinning keeps this legacy upsert deterministic.
     const doc = await StockUpdate.findOneAndUpdate(
-      { brandId: brand._id, date: dateObj },
+      { brandId: brand._id, date: dateObj, correctionSeq: 0 },
       {
         $set: {
           brandName: String(brand.brandName).trim(),

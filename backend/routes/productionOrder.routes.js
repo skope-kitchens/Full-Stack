@@ -3,6 +3,7 @@ import { authMiddleware } from "../middleware/auth.js";
 import { requireRole } from "../middleware/requireAdmin.js";
 import {
   reviewAndAdvanceToPayment,
+  createProductionPaymentOrder,
   executeBrandProductionPayment,
   getMyPendingProductionOrders,
   getReadyForDispatchOrders,
@@ -67,7 +68,10 @@ router.patch(
   dispatchWarehouseIngredients
 );
 
-// Client — pay the production invoice (atomic wallet deduction)
+// Client — create a Razorpay order for the production invoice (wallet-free)
+router.post("/:id/create-order", authMiddleware, createProductionPaymentOrder);
+
+// Client — verify Razorpay payment & mark the production invoice PAID
 router.post("/:id/pay", authMiddleware, executeBrandProductionPayment);
 
 // Auth only — lightweight status poll for the chef waiting for IN_PREPARATION

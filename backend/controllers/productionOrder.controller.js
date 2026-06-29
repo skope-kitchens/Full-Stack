@@ -4,6 +4,7 @@ import BrandStock from "../models/brandStock.js";
 import SubRecipe from "../models/subrecipe.models.js";
 import Projection from "../models/projection.js";
 import { escapeRegex, extractIngredientsFromBOM, aggregateIngredients } from "../utils/bomExpander.js";
+import { createInvoiceOrder, verifyRazorpaySignature } from "../utils/razorpay.js";
 
 /**
  * PATCH /api/production-orders/:id/request-payment
@@ -41,30 +42,23 @@ export const reviewAndAdvanceToPayment = async (req, res) => {
 };
 
 /**
- * POST /api/production-orders/:id/pay
- * Client auth only — brandId on the order must match req.user._id.
- *
- * Atomic wallet deduction via findOneAndUpdate with balance threshold guard
- * (ADR-08: prevents TOCTOU race conditions).
- * On success: flips order → READY_FOR_DISPATCH, paymentStatus → PAID.
+ * POST /api/production-orders/:id/create-order
+ * Client auth only. Creates a Razorpay order for the production invoice cost and
+ * stores razorpayOrderId on the order, so the client can launch checkout.
+ * (Wallet-free — CLAUDE.md §24.)
  */
-export const executeBrandProductionPayment = async (req, res) => {
+export const createProductionPaymentOrder = async (req, res) => {
   try {
     const { id } = req.params;
-
     if (req.user.role !== "client") {
       return res.status(403).json({ message: "Only brand clients can pay production invoices" });
     }
 
     const order = await ProductionOrder.findById(id);
-    if (!order) {
-      return res.status(404).json({ message: "Production order not found" });
-    }
-
+    if (!order) return res.status(404).json({ message: "Production order not found" });
     if (order.brandId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "You are not authorised to pay this invoice" });
     }
-
     if (order.status !== "AWAITING_BRAND_PAYMENT") {
       return res.status(409).json({
         message: `Cannot pay: order status is "${order.status}"`,
@@ -73,47 +67,91 @@ export const executeBrandProductionPayment = async (req, res) => {
     }
 
     const cost = Number(order.financials?.totalIngredientCost || 0);
+    if (!(cost > 0)) return res.status(400).json({ message: "This order has no payable amount" });
 
-    // Atomic balance deduction — only succeeds when balance >= cost
-    const updatedUser = await User.findOneAndUpdate(
-      { _id: req.user._id, "wallet.balance": { $gte: cost } },
-      {
-        $inc: { "wallet.balance": -cost },
-        $push: {
-          "wallet.transactions": {
-            amount: cost,
-            type: "debit",
-            source: "order",
-            reason: `Production invoice #${order._id.toString().slice(-6).toUpperCase()} — ${order.brandName}`,
-            createdAt: new Date(),
-          },
-        },
-      },
-      { new: true }
-    );
+    let rzpOrder;
+    try {
+      rzpOrder = await createInvoiceOrder(cost, "PROD");
+    } catch (e) {
+      console.error("[ProductionPay] Razorpay order failed:", e?.message || e);
+      return res.status(502).json({ message: "Could not create payment order" });
+    }
 
-    if (!updatedUser) {
-      return res.status(400).json({
-        message: "Insufficient wallet funds. Please top up your brand balance.",
+    order.financials.razorpayOrderId = rzpOrder.id;
+    await order.save();
+
+    return res.json({
+      success: true,
+      razorpayOrderId: rzpOrder.id,
+      amount: cost,
+      keyId: process.env.RAZORPAY_KEY_ID,
+    });
+  } catch (err) {
+    console.error("createProductionPaymentOrder error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to start production payment" });
+  }
+};
+
+/**
+ * POST /api/production-orders/:id/pay
+ * Client auth only — brandId on the order must match req.user._id.
+ *
+ * RAZORPAY-DIRECT (CLAUDE.md §24): the OLD wallet-deduction path is FULLY
+ * REPLACED. This handler now verifies the Razorpay signature and, on success,
+ * flips the order → READY_FOR_DISPATCH, paymentStatus → PAID, paidVia → RAZORPAY.
+ * No wallet balance is read or written. paidVia is ALWAYS "RAZORPAY" here —
+ * "WALLET_LEGACY" is reserved for historical records and is never written by
+ * any new code path.
+ */
+export const executeBrandProductionPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+
+    if (req.user.role !== "client") {
+      return res.status(403).json({ message: "Only brand clients can pay production invoices" });
+    }
+
+    if (!verifyRazorpaySignature({ razorpay_order_id, razorpay_payment_id, razorpay_signature })) {
+      return res.status(400).json({ message: "Payment verification failed" });
+    }
+
+    const order = await ProductionOrder.findById(id);
+    if (!order) {
+      return res.status(404).json({ message: "Production order not found" });
+    }
+    if (order.brandId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "You are not authorised to pay this invoice" });
+    }
+    if (order.status !== "AWAITING_BRAND_PAYMENT") {
+      return res.status(409).json({
+        message: `Cannot pay: order status is "${order.status}"`,
+        currentStatus: order.status,
       });
+    }
+    // The signed order must match the one created for this production order.
+    if (
+      order.financials?.razorpayOrderId &&
+      String(order.financials.razorpayOrderId) !== String(razorpay_order_id)
+    ) {
+      return res.status(400).json({ message: "Payment does not match this invoice" });
     }
 
     order.status = "READY_FOR_DISPATCH";
     order.financials.paymentStatus = "PAID";
     order.financials.paidAt = new Date();
+    order.financials.razorpayPaymentId = razorpay_payment_id;
+    order.financials.paidVia = "RAZORPAY";
     await order.save();
 
     console.log(
-      `[ExecuteBrandProductionPayment] ProductionOrder ${id} PAID → READY_FOR_DISPATCH ` +
-      `(brand: "${order.brandName}", cost: ₹${cost}, newBalance: ₹${updatedUser.wallet.balance})`
+      `[ExecuteBrandProductionPayment] ProductionOrder ${id} PAID (Razorpay) → READY_FOR_DISPATCH ` +
+      `(brand: "${order.brandName}", cost: ₹${order.financials.totalIngredientCost})`
     );
 
     return res.json({
       success: true,
-      data: {
-        productionOrder: order,
-        newBalance: updatedUser.wallet.balance,
-      },
+      data: { productionOrder: order },
     });
   } catch (err) {
     console.error("executeBrandProductionPayment error:", err?.message || err);

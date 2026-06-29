@@ -1,256 +1,164 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../utils/api";
 import Layout from "../components/Layout";
 import toast from "../utils/toast";
+import FcrIterationTimeline from "../components/FcrIterationTimeline";
 
-const BRANCH_OPTIONS = ["BEN", "MAR", "JNG", "KOR", "HO"];
+/* ============================================================
+ * Constants & helpers
+ * ========================================================== */
 
-const BRANCH_LABELS = {
-  BEN: "JP Nagar",
-  MAR: "Marathahalli",
-  JNG: "Jayanagar",
-  KOR: "Koramangala",
-  HO: "Head Office",
+const BRANCH_DISPLAY = {
+  JPNAGAR: "Main Kitchen",
+  TESTBRANCH: "Test Branch",
+  MARATHAHALLI: "Marathahalli",
+  KALYANNAGAR: "Kalyan Nagar",
 };
 
-const MENU_BRANCH_OPTIONS = [
-  { label: "JP Nagar", value: "JPNAGAR" },
-  { label: "Marathahalli", value: "MARATHAHALLI" },
-  { label: "Kalyan Nagar", value: "KALYANNAGAR" },
-  { label: "Test Branch", value: "TESTBRANCH" },
-];
 const formatMoney = (value) =>
   Number(value || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
-  const CREDIT_PER_HOUR = 60;
+const formatCurrency = (n) => `₹${formatMoney(n)}`;
+const today = () => new Date().toISOString().slice(0, 10);
 
-const calculateMeetingHours = (balance) => {
-  if (!balance) return 0;
-  return balance / CREDIT_PER_HOUR;
-};
+const DRAWER_ITEMS = [
+  { key: "onboarding", label: "Service Onboarding Status" },
+  { key: "sop", label: "SOP Documents" },
+  { key: "projections", label: "Enter Projections", gate: "LIVE" },
+  { key: "dailyStock", label: "Daily Stock" },
+  { key: "auditHistory", label: "Audit History", gate: "LIVE" },
+  { key: "fcr", label: "Food Cost / FCR" },
+  { key: "analyticsDaily", label: "Per Day Analytics", gate: "LIVE" },
+  { key: "analyticsRange", label: "Analytics (Date Range)", gate: "LIVE" },
+  { key: "invoices", label: "Invoices" },
+  { key: "grns", label: "Goods Received Notes" },
+  { key: "profile", label: "Profile" },
+];
 
+/* ============================================================
+ * Reusable Branch dropdown
+ * ========================================================== */
+function BranchSelect({ branches, value, onChange, label = "Select Branch" }) {
+  return (
+    <div className="max-w-xs">
+      <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+      >
+        {branches.map((b) => (
+          <option key={b.branchCode} value={b.branchCode}>
+            {b.displayName}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/* ============================================================
+ * KPI tile
+ * ========================================================== */
+function Stat({ title, value }) {
+  return (
+    <div className="bg-[#181818] p-6 rounded-xl border border-gray-700">
+      <p className="text-gray-400 text-xs uppercase mb-2">{title}</p>
+      <p className="text-3xl font-bold">{value ?? "—"}</p>
+    </div>
+  );
+}
+
+function LockedNotice({ message }) {
+  return (
+    <div className="bg-white rounded-2xl shadow p-10 text-center">
+      <h3 className="text-lg font-semibold">Locked</h3>
+      <p className="text-gray-500 text-sm mt-1">{message}</p>
+    </div>
+  );
+}
+
+/* ============================================================
+ * MAIN DASHBOARD
+ * ========================================================== */
 export default function Dashboard() {
   const navigate = useNavigate();
 
-  /* ---------------- STATE ---------------- */
-  const [analytics, setAnalytics] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [activeView, setActiveView] = useState("home");
 
-  const [clientAnalytics, setClientAnalytics] = useState(null);
-  const [clientLoading, setClientLoading] = useState(false);
+  const [profile, setProfile] = useState(null);
+  const [branches, setBranches] = useState([]);
+  const [homeBranch, setHomeBranch] = useState("");
 
-
-  const [wallet, setWallet] = useState(null);
-  const meetingHours = calculateMeetingHours(wallet?.balance);
-  const [showWallet, setShowWallet] = useState(false);
-
-  const [showTransactions, setShowTransactions] = useState(false);
-  const [transactions, setTransactions] = useState([]);
-
-
-  const [selectedBranches, setSelectedBranches] = useState([]);
-  const [day, setDay] = useState("");
-
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [customAmount, setCustomAmount] = useState("");
-
-  const [services, setServices] = useState([]);
-  const [servicesLoading, setServicesLoading] = useState(false);
-
-  const [showOrders, setShowOrders] = useState(false);
-  const [orders, setOrders] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
-
-  const [showEnterMenu, setShowEnterMenu] = useState(false);
-  const [menuRows, setMenuRows] = useState([
-    { recipeName: "", qty: 1, uom: "PC", cost: 0 },
-  ]);
-  const [menuBranchCode, setMenuBranchCode] = useState("");
-  const [menuSaving, setMenuSaving] = useState(false);
-  const [showClientMenu, setShowClientMenu] = useState(false);
-
+  // Production invoices (reused from legacy)
   const [productionOrders, setProductionOrders] = useState([]);
   const [payingOrderId, setPayingOrderId] = useState(null);
 
+  // Enter-menu modal (reused) + submitted menu view
+  const [showEnterMenu, setShowEnterMenu] = useState(false);
+  const [menuRows, setMenuRows] = useState([{ recipeName: "", qty: 1, uom: "PC", cost: 0 }]);
+  const [menuBranchCode, setMenuBranchCode] = useState("");
+  const [menuSaving, setMenuSaving] = useState(false);
+  const [submittedMenu, setSubmittedMenu] = useState([]);
 
-  /* ---------------- TOKEN ---------------- */
-  function getTokenSafely() {
+  // Logo popup
+  const [showLogoModal, setShowLogoModal] = useState(false);
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoSaving, setLogoSaving] = useState(false);
+
+  const lifecycleStage = profile?.lifecycleStage || "AWAITING_MENU";
+
+  /* ---------------- Loaders ---------------- */
+  const loadProfile = useCallback(async () => {
     try {
-      return (
-        sessionStorage.getItem("skope_auth_token") ||
-        localStorage.getItem("skope_auth_token") ||
-        localStorage.getItem("token")
-      );
-    } catch {
-      return null;
-    }
-  }
-
-
-  /* ---------------- WALLET ---------------- */
-  useEffect(() => {
-    const fetchWallet = async () => {
-      try {
-        const res = await api.get("/api/wallet");
-
-        const walletData = {
-          balance: res.data.balance ?? 0,
-          dueAmount: res.data.dueAmount ?? 0,
-          dueReason: res.data.dueReason ?? null,
-          transactions: res.data.transactions ?? []
-        };
-
-        setWallet(walletData);
-        setTransactions(walletData.transactions);
-      } catch (err) {
-        console.error("Failed to fetch wallet", err);
-      }
-    };
-
-    fetchWallet();
-  }, []);
-
-  
-  const startRecharge = async (amount) => {
-  try {
-    const { data } = await api.post("/api/wallet/create-order", { amount });
-
-    const options = {
-      key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-      amount: data.amount,
-      currency: "INR",
-      order_id: data.id,
-      name: "Skope Wallet",
-      description: "Wallet Recharge",
-      handler: async (response) => {
-        await api.post("/api/wallet/verify", {
-          ...response,
-          amount,
-          applyGst: false
-        });
-
-        const res = await api.get("/api/wallet");
-
-        const walletData = {
-          balance: res.data.balance ?? 0,
-          dueAmount: res.data.dueAmount ?? 0,
-          dueReason: res.data.dueReason ?? null,
-          transactions: res.data.transactions ?? []
-        };
-
-        setWallet(walletData);
-        setTransactions(walletData.transactions);
-        toast.success("Wallet recharged successfully");
-      }
-    };
-    const rzp = new window.Razorpay(options);
-    rzp.open();
-  } catch (err) {
-    toast.error("Payment failed. Please try again.");
-    console.error(err);
-  }
-};
-
-  const payDue = async () => {
-    if (!wallet?.dueAmount || wallet.dueAmount <= 0) {
-      toast.info("No due amount to pay");
-      return;
-    }
-
-    try {
-      const dueAmount = wallet.dueAmount;
-      const gstInclusiveDue = Number(dueAmount) * 1.18;
-      const { data } = await api.post("/api/wallet/create-order", {
-        amount: gstInclusiveDue,
-      });
-
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-        amount: data.amount,
-        currency: "INR",
-        order_id: data.id,
-        name: "Skope Wallet",
-        description: `Pay Due Amount (incl GST): ₹${formatMoney(
-          gstInclusiveDue
-        )}`,
-        handler: async (response) => {
-          await api.post("/api/wallet/verify", {
-            ...response,
-            amount: dueAmount,
-            applyGst: true
-          });
-
-          const res = await api.get("/api/wallet");
-
-          const walletData = {
-            balance: res.data.balance ?? 0,
-            dueAmount: res.data.dueAmount ?? 0,
-            dueReason: res.data.dueReason ?? null,
-            transactions: res.data.transactions ?? []
-          };
-
-          setWallet(walletData);
-          setTransactions(walletData.transactions);
-
-          if (walletData.dueAmount === 0) {
-            toast.success("Due amount cleared successfully!");
-          } else {
-            toast.success("Payment successful — due amount partially cleared.");
-          }
-        }
-      };
-      const rzp = new window.Razorpay(options);
-      rzp.open();
+      const res = await api.get("/api/client/profile");
+      setProfile(res.data);
     } catch (err) {
-      toast.error("Payment failed. Please try again.");
-      console.error(err);
+      console.error("Failed to fetch profile", err);
     }
-  };
-
-  /*----------------Services-----------------*/
-    useEffect(() => {
-      const fetchServices = async () => {
-        try {
-          setServicesLoading(true);
-          const res = await api.get("/api/services/client");
-          setServices(res.data.services || []);
-        } catch (err) {
-          console.error("Failed to load services", err);
-        } finally {
-          setServicesLoading(false);
-        }
-      };
-
-      fetchServices();
-    }, []);
-
-  /*----------------Orders-----------------*/
-  useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        setOrdersLoading(true);
-        const res = await api.get("/api/client/orders");
-        setOrders(res.data || []);
-      } catch (err) {
-        console.error("Failed to load orders", err);
-      } finally {
-        setOrdersLoading(false);
-      }
-    };
-
-    fetchOrders();
-    
-    // Refresh orders every 10 seconds to check for completed orders
-    const interval = setInterval(fetchOrders, 10000);
-    return () => clearInterval(interval);
   }, []);
 
-  /* ---------------- PRODUCTION ORDERS (awaiting payment) ---------------- */
+  const loadBranches = useCallback(async () => {
+    try {
+      const res = await api.get("/api/client/branches");
+      const list = res.data || [];
+      setBranches(list);
+      if (list.length) {
+        setHomeBranch((prev) => prev || list[0].branchCode);
+        setMenuBranchCode((prev) => prev || list[0].branchCode);
+      }
+    } catch (err) {
+      console.error("Failed to fetch branches", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProfile();
+    loadBranches();
+  }, [loadProfile, loadBranches]);
+
+  // Submitted menu for the selected home branch
+  const loadSubmittedMenu = useCallback(async (branchCode) => {
+    if (!branchCode) return;
+    try {
+      const res = await api.get("/api/client/menu", { params: { branchCode } });
+      setSubmittedMenu(res.data?.data || []);
+    } catch (err) {
+      console.error("Failed to fetch submitted menu", err);
+      setSubmittedMenu([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (homeBranch) loadSubmittedMenu(homeBranch);
+  }, [homeBranch, loadSubmittedMenu]);
+
+  // Production orders (poll like legacy)
   useEffect(() => {
     const fetchProductionOrders = async () => {
       try {
@@ -261,194 +169,132 @@ export default function Dashboard() {
       }
     };
     fetchProductionOrders();
-    // Poll every 30 s so a new invoice raised while the brand is on-screen appears automatically
     const interval = setInterval(fetchProductionOrders, 30000);
     return () => clearInterval(interval);
   }, []);
 
+  /* ---------------- Production invoice payment (Razorpay-direct) ---------------- */
   const payProductionInvoice = async (orderId, cost) => {
     try {
       setPayingOrderId(orderId);
-      const res = await api.post(`/api/production-orders/${orderId}/pay`);
-
-      // Refresh wallet balance
-      const walletRes = await api.get("/api/wallet");
-      const walletData = {
-        balance: walletRes.data.balance ?? 0,
-        dueAmount: walletRes.data.dueAmount ?? 0,
-        dueReason: walletRes.data.dueReason ?? null,
-        transactions: walletRes.data.transactions ?? [],
+      // 1) Create the Razorpay order on the production order.
+      const { data } = await api.post(`/api/production-orders/${orderId}/create-order`);
+      // 2) Launch checkout.
+      const options = {
+        key: data.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: Math.round(Number(cost) * 100),
+        currency: "INR",
+        order_id: data.razorpayOrderId,
+        name: "Skope Kitchens",
+        description: `Production Invoice #${orderId.toString().slice(-6).toUpperCase()}`,
+        handler: async (response) => {
+          // 3) Verify the signature server-side → flips order to PAID.
+          try {
+            await api.post(`/api/production-orders/${orderId}/pay`, {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            setProductionOrders((prev) => prev.filter((o) => o._id !== orderId));
+            toast.success(`Production invoice paid — ₹${formatMoney(cost)}.`);
+          } catch (err) {
+            toast.error(err.response?.data?.message || "Payment verification failed");
+          } finally {
+            setPayingOrderId(null);
+          }
+        },
+        modal: { ondismiss: () => setPayingOrderId(null) },
       };
-      setWallet(walletData);
-      setTransactions(walletData.transactions);
-
-      // Remove the paid order from banner
-      setProductionOrders((prev) => prev.filter((o) => o._id !== orderId));
-
-      toast.success(`Production invoice paid — ₹${formatMoney(cost)} deducted from wallet.`);
+      const rzp = new window.Razorpay(options);
+      rzp.open();
     } catch (err) {
-      const message = err.response?.data?.message || "Payment failed. Please try again.";
-      toast.error(message);
-    } finally {
+      toast.error(err.response?.data?.message || "Payment failed. Please try again.");
       setPayingOrderId(null);
     }
   };
 
-  const markAsReceived = async (orderId) => {
-    try {
-      await api.patch(`/api/client/orders/${orderId}/receive`);
-      
-      // Update local state
-      setOrders((prev) =>
-        prev.map((o) =>
-          o._id === orderId
-            ? { ...o, isReceived: true, receivedAt: new Date() }
-            : o
-        )
-      );
-      
-      toast.success("Order marked as received!");
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to mark order as received");
-    }
-  };
-
-  // Count completed but not received orders for notification badge
-  const completedOrdersCount = orders.filter(
-    (o) => o.status === "COMPLETED" && !o.isReceived
-  ).length;
-
-
-
-  /* ---------------- USER ---------------- */
-  let storedUser = null;
-  try {
-    storedUser =
-      JSON.parse(sessionStorage.getItem("skope_user")) ||
-      JSON.parse(localStorage.getItem("skope_user"));
-  } catch {}
-
-  const brandName = storedUser?.brandName || "Your Brand";
-
-  /* ---------------- BRANCH HANDLER ---------------- */
-  const handleBranchChange = (branch) => {
-    setSelectedBranches((prev) =>
-      prev.includes(branch)
-        ? prev.filter((b) => b !== branch)
-        : [...prev, branch]
-    );
-  };
-
-  /* ---------------- DAILY ANALYTICS ---------------- */
-  const fetchAnalytics = async () => {
-    if (selectedBranches.length === 0 || !day) {
-      toast.info("Select at least one branch and a date");
+  /* ---------------- Menu submit (reused) ---------------- */
+  const submitMenu = async () => {
+    const items = menuRows
+      .map((row) => ({
+        recipeName: String(row.recipeName || "").trim(),
+        qty: Number(row.qty || 0),
+        uom: String(row.uom || "").trim(),
+        cost: Number(row.cost || 0),
+      }))
+      .filter((row) => row.recipeName && row.qty > 0 && row.uom);
+    if (items.length === 0) {
+      toast.error("Add at least one valid menu item");
       return;
     }
-
-    setLoading(true);
-
+    if (!menuBranchCode) {
+      toast.error("Please select a kitchen branch");
+      return;
+    }
     try {
-      const res = await api.get("/api/analytics/sales/summary", {
-        params: { branches: selectedBranches, day },
-      });
-      setAnalytics(res.data);
-    } catch {
-      toast.error("Failed to load analytics");
-      setAnalytics(null);
+      setMenuSaving(true);
+      await api.post("/api/menu-entries", { items, branchCode: menuBranchCode });
+      setShowEnterMenu(false);
+      setMenuRows([{ recipeName: "", qty: 1, uom: "PC", cost: 0 }]);
+      toast.success("Menu submitted successfully");
+      // Menu submission may flip lifecycle AWAITING_MENU -> IN_TRIAL.
+      await loadProfile();
+      if (menuBranchCode === homeBranch) loadSubmittedMenu(homeBranch);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to save menu");
     } finally {
-      setLoading(false);
+      setMenuSaving(false);
     }
   };
 
-  /* ---------------- CLIENT RANGE ANALYTICS ---------------- */
-  const fetchClientAnalytics = async () => {
-  if (!fromDate || !toDate || selectedBranches.length === 0) {
-    toast.info("Select branches and both date fields");
-    return;
-  }
+  /* ---------------- Logo file select + validate ---------------- */
+  const LOGO_ALLOWED_TYPES = ["image/png", "image/jpeg", "image/svg+xml"]; // PNG/JPG/JPEG/SVG
+  const LOGO_MAX_BYTES = 2 * 1024 * 1024; // 2MB
 
-  setClientLoading(true);
-
-  try {
-    const start = new Date(fromDate);
-    const end = new Date(toDate);
-
-    let cursor = new Date(start);
-
-    const aggregate = {
-      noOfSales: 0,
-      revenue: 0,
-      netAmount: 0,
-      taxTotal: 0,
-      discountTotal: 0,
-      items: [],
-    };
-
-    const itemMap = {};
-
-    while (cursor <= end) {
-      const dayStr = cursor.toISOString().slice(0, 10);
-
-      try {
-        const res = await api.get("/api/analytics/sales/summary", {
-          params: {
-            branches: selectedBranches,
-            day: dayStr,
-          },
-        });
-
-        const data = res.data;
-
-        if (!data || data.noData) {
-          cursor.setDate(cursor.getDate() + 1);
-          continue;
-        }
-
-        aggregate.noOfSales += Number(data.noOfSales || 0);
-        aggregate.revenue += Number(data.revenue || 0);
-        aggregate.netAmount += Number(data.netAmount || 0);
-        aggregate.taxTotal += Number(data.taxTotal || 0);
-        aggregate.discountTotal += Number(data.discountTotal || 0);
-
-        (data.items || []).forEach((i) => {
-          const key = i.name || i.itemName || "Unknown";
-
-          if (!itemMap[key]) {
-            itemMap[key] = {
-              name: key,
-              quantity: 0,
-              netAmount: 0,
-            };
-          }
-
-          itemMap[key].quantity += Number(i.quantity || 0);
-          itemMap[key].netAmount += Number(i.netAmount || 0);
-        });
-      } catch {
-        // silently skip failed days
-      }
-
-      cursor.setDate(cursor.getDate() + 1);
+  const onLogoFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!LOGO_ALLOWED_TYPES.includes(file.type)) {
+      toast.error("Only PNG, JPG, JPEG or SVG files are allowed");
+      e.target.value = "";
+      setLogoFile(null);
+      return;
     }
+    if (file.size > LOGO_MAX_BYTES) {
+      toast.error("Logo file is too large (max 2MB)");
+      e.target.value = "";
+      setLogoFile(null);
+      return;
+    }
+    setLogoFile(file);
+  };
 
-    aggregate.items = Object.values(itemMap);
-
-    // derived avg sale
-    aggregate.avgSaleAmount = aggregate.noOfSales
-      ? aggregate.revenue / aggregate.noOfSales
-      : 0;
-
-    setClientAnalytics(aggregate);
-  } catch (err) {
-    console.error(err);
-    toast.error("Failed to load analytics");
-    setClientAnalytics(null);
-  } finally {
-    setClientLoading(false);
-  }
-};
-
+  /* ---------------- Logo upload + save ---------------- */
+  const saveLogo = async () => {
+    if (!logoFile) {
+      toast.error("Choose a logo file");
+      return;
+    }
+    try {
+      setLogoSaving(true);
+      // 1. Upload the file to Cloudinary via the backend.
+      const form = new FormData();
+      form.append("file", logoFile);
+      const up = await api.post("/api/client/logo-upload", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      // 2. Persist the returned secure URL on the User record.
+      const res = await api.patch("/api/client/logo", { logoUrl: up.data.logoUrl });
+      setProfile((p) => ({ ...p, logoUrl: res.data.logoUrl }));
+      setShowLogoModal(false);
+      setLogoFile(null);
+      toast.success("Logo updated");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to update logo");
+    } finally {
+      setLogoSaving(false);
+    }
+  };
 
   const handleLogout = () => {
     sessionStorage.clear();
@@ -456,697 +302,245 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  /* ---------------- DERIVED KPIs (SAME AS EARLIER) ---------------- */
-  const totalOrders = analytics?.noOfSales ?? 0;
-  const revenue = analytics?.revenue ?? 0;
-  const netRevenue = analytics?.netAmount ?? 0;
-  const taxTotal = analytics?.taxTotal ?? 0;
-  const discountTotal = analytics?.discountTotal ?? 0;
-  const aov = analytics?.avgSaleAmount ?? 0;
-  const revenuePerOrder = aov;
+  const isLive = lifecycleStage === "LIVE";
 
-  const totalItemQty =
-    analytics?.items?.reduce((s, i) => s + Number(i.quantity || 0), 0) || 0;
+  const openDrawerItem = (item) => {
+    if (item.gate === "LIVE" && !isLive) {
+      // Still allow opening projections/analytics views — they render a locked state.
+      setActiveView(item.key);
+      return;
+    }
+    if (item.key === "projections" && isLive) {
+      navigate("/projection");
+      return;
+    }
+    setActiveView(item.key);
+  };
 
-  const totalItemNet =
-    analytics?.items?.reduce((s, i) => s + Number(i.netAmount || 0), 0) || 0;
-
-  const itemsPerOrder =
-    totalOrders ? (totalItemQty / totalOrders).toFixed(2) : "—";
-
-  const avgItemSellingPrice =
-    totalItemQty ? (totalItemNet / totalItemQty).toFixed(2) : "—";
-
-  const formatCurrency = (n) =>
-    `₹${Number(n || 0).toLocaleString("en-IN")}`;
-
+  /* ---------------- Render ---------------- */
   return (
     <Layout>
-      <div className="min-h-screen bg-slate-50 px-6 py-10">
-        <div className="mx-auto max-w-7xl space-y-10">
+      <div className="min-h-screen bg-slate-50 flex">
+        {/* ===== LEFT DRAWER ===== */}
+        <aside
+          className={`${
+            collapsed ? "w-16" : "w-64"
+          } shrink-0 bg-white border-r border-gray-200 transition-all duration-200 flex flex-col`}
+        >
+          <div className="flex items-center justify-between p-3 border-b">
+            {!collapsed && <span className="font-semibold text-sm">Menu</span>}
+            <button
+              onClick={() => setCollapsed((c) => !c)}
+              className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+              title={collapsed ? "Expand" : "Collapse"}
+            >
+              {collapsed ? "»" : "«"}
+            </button>
+          </div>
 
-          {/* ---------------- HEADER ---------------- */}
-          <header className="rounded-2xl bg-[url('/assets/Main-bg.png')] bg-cover p-8 shadow">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-slate-500">
-                  Brand Dashboard
-                </p>
-                <h1 className="text-3xl font-semibold">{brandName}</h1>
-              </div>
+          <nav className="flex-1 py-2 overflow-y-auto">
+            <button
+              onClick={() => setActiveView("home")}
+              className={`w-full px-4 py-2.5 text-sm text-left hover:bg-gray-100 ${
+                activeView === "home" ? "bg-gray-100 font-semibold" : ""
+              }`}
+              title={collapsed ? "Home" : ""}
+            >
+              {collapsed ? "H" : "Home"}
+            </button>
 
-              <div className="flex gap-4 items-center">
-                {/* Hamburger menu */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowClientMenu((prev) => !prev)}
-                    className="bg-white px-3 py-2 rounded-xl shadow cursor-pointer text-lg leading-none"
-                    aria-haspopup="menu"
-                    aria-expanded={showClientMenu}
-                  >
-                    ≡
-                  </button>
-
-                  {showClientMenu && (
-                    <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-20 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowClientMenu(false);
-                          setShowEnterMenu(true);
-                        }}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                      >
-                        Enter Menu
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowClientMenu(false);
-                          navigate("/projection");
-                        }}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                      >
-                        Projection
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowClientMenu(false);
-                          navigate("/client-inventory");
-                        }}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
-                      >
-                        Inventory
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowClientMenu(false);
-                          setShowOrders(true);
-                        }}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 flex items-center justify-between"
-                      >
-                        <span>Orders</span>
-                        {completedOrdersCount > 0 && (
-                          <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">
-                            {completedOrdersCount}
-                          </span>
-                        )}
-                      </button>
-                      
-
-                      <div className="px-4 py-2 text-xs text-gray-500 flex items-center justify-between border-t">
-                        <span>Meeting Time Left</span>
-                        <span className="font-semibold text-blue-600">
-                          {meetingHours.toFixed(1)} hrs
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div
-                  onClick={() => setShowWallet(true)}
-                  className="bg-white px-4 py-2 rounded-xl flex items-center shadow cursor-pointer"
-                >
-                  Wallet: ₹{formatMoney(wallet?.balance)}
-                </div>
-
+            {DRAWER_ITEMS.map((item) => {
+              const locked = item.gate === "LIVE" && !isLive;
+              return (
                 <button
-                  onClick={handleLogout}
-                  className="bg-black text-white px-4 py-2 rounded-lg"
+                  key={item.key}
+                  onClick={() => openDrawerItem(item)}
+                  className={`w-full px-4 py-2.5 text-sm text-left hover:bg-gray-100 ${
+                    activeView === item.key ? "bg-gray-100 font-semibold" : ""
+                  }`}
+                  title={collapsed ? item.label : ""}
                 >
-                  Logout
+                  {collapsed ? (
+                    item.label.charAt(0)
+                  ) : (
+                    <span className="flex-1 flex items-center justify-between">
+                      {item.label}
+                      {locked && (
+                        <span className="text-[10px] uppercase tracking-wide text-gray-400">Locked</span>
+                      )}
+                    </span>
+                  )}
                 </button>
-              </div>
-            </div>
-            {wallet?.dueAmount > 0 && (
-              <div className="bg-red-100 border border-red-300 text-red-800 p-4 rounded-lg mb-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="font-semibold">
-                      ⚠️ Pending Due (incl GST): ₹{formatMoney(Number(wallet.dueAmount || 0) * 1.18)}
-                    </p>
-                    <p className="text-sm mt-1">
-                      {wallet.dueReason || "Please clear the pending amount"}
-                    </p>
-                  </div>
-                  <button
-                    onClick={payDue}
-                    className="ml-4 bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap"
-                  >
-                    Pay Due
-                  </button>
-                </div>
-              </div>
-            )}
+              );
+            })}
+          </nav>
+        </aside>
 
-            {/* ---------------- PRODUCTION INVOICE BANNERS ---------------- */}
+        {/* ===== MAIN AREA ===== */}
+        <div className="flex-1 min-w-0">
+          {/* Top bar */}
+          <div className="flex justify-end items-center gap-4 px-6 py-3 bg-white border-b">
+            <button onClick={handleLogout} className="bg-black text-white px-4 py-2 rounded-lg text-sm">
+              Logout
+            </button>
+          </div>
+
+          <div className="p-6 max-w-7xl mx-auto space-y-6">
+            {/* Production invoice banners (visible everywhere) — paid via Razorpay */}
             {productionOrders.map((po) => {
               const invoiceCost = Number(po.financials?.totalIngredientCost || 0);
-              const walletBalance = Number(wallet?.balance || 0);
-              const hasSufficientFunds = walletBalance >= invoiceCost;
               const isPaying = payingOrderId === po._id;
-
               return (
-                <div
-                  key={po._id}
-                  className="mt-4 rounded-2xl border-2 border-amber-400 bg-amber-50 shadow-sm overflow-hidden"
-                >
-                  {/* Card header */}
+                <div key={po._id} className="rounded-2xl border-2 border-amber-400 bg-amber-50 shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-3 bg-amber-100 border-b border-amber-300">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
-                      <span className="font-bold text-amber-900 text-sm uppercase tracking-wide">
-                        Production Invoice Ready for Payment
-                      </span>
-                    </div>
+                    <span className="font-bold text-amber-900 text-sm uppercase tracking-wide">
+                      Production Invoice Ready for Payment
+                    </span>
                     <span className="text-xs text-amber-700 font-mono">
                       Ref #{po._id.toString().slice(-6).toUpperCase()}
                     </span>
                   </div>
-
-                  <div className="px-5 py-4 space-y-4">
-                    {/* Description */}
-                    <p className="text-sm text-amber-800">
-                      Skope Kitchen has approved your production run. Pay the ingredient invoice below
-                      to release the cargo and begin preparation.
-                    </p>
-
-                    {/* Ingredient breakdown table */}
-                    {(po.warehouseIngredientsToDispatch || []).length > 0 && (
-                      <div className="rounded-lg overflow-hidden border border-amber-200">
-                        <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
-                          <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
-                            Ingredients in this Order
-                          </span>
-                        </div>
-                        <table className="w-full text-sm">
-                          <thead className="bg-white border-b border-amber-100">
-                            <tr>
-                              <th className="px-4 py-2 text-left font-semibold text-gray-600">Item</th>
-                              <th className="px-4 py-2 text-right font-semibold text-gray-600">Qty</th>
-                              <th className="px-4 py-2 text-left font-semibold text-gray-600">UOM</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {po.warehouseIngredientsToDispatch.map((item, idx) => (
-                              <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-amber-50"}>
-                                <td className="px-4 py-2 font-medium text-gray-800">{item.itemName}</td>
-                                <td className="px-4 py-2 text-right tabular-nums text-gray-700">
-                                  {Number(item.requiredQty || 0).toFixed(3)}
-                                </td>
-                                <td className="px-4 py-2 text-gray-500 uppercase text-xs">
-                                  {item.uom || "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {/* Sub-recipes being prepared */}
-                    {(po.subRecipesToPrepare || []).length > 0 && (
-                      <div className="rounded-lg overflow-hidden border border-amber-200">
-                        <div className="bg-amber-100 px-4 py-2 border-b border-amber-200">
-                          <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
-                            Preparation Schedule
-                          </span>
-                        </div>
-                        <table className="w-full text-sm">
-                          <thead className="bg-white border-b border-amber-100">
-                            <tr>
-                              <th className="px-4 py-2 text-left font-semibold text-gray-600">Sub-Recipe</th>
-                              <th className="px-4 py-2 text-right font-semibold text-gray-600">Batches</th>
-                              <th className="px-4 py-2 text-left font-semibold text-gray-600">UOM</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {po.subRecipesToPrepare.map((item, idx) => (
-                              <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-amber-50"}>
-                                <td className="px-4 py-2 font-medium text-gray-800">{item.subRecipeName}</td>
-                                <td className="px-4 py-2 text-right tabular-nums text-gray-700">
-                                  {item.batchesToPrepare}
-                                </td>
-                                <td className="px-4 py-2 text-gray-500 uppercase text-xs">
-                                  {item.uom || "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {/* Cost vs wallet balance row + pay button */}
-                    <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-6 text-sm">
-                          <div>
-                            <span className="text-gray-500">Invoice Total</span>
-                            <p className="font-bold text-xl text-amber-900">
-                              ₹{formatMoney(invoiceCost)}
-                            </p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500">Wallet Balance</span>
-                            <p className={`font-bold text-xl ${hasSufficientFunds ? "text-green-700" : "text-red-600"}`}>
-                              ₹{formatMoney(walletBalance)}
-                            </p>
-                          </div>
-                        </div>
-                        {!hasSufficientFunds && (
-                          <p className="text-xs text-red-600 font-medium">
-                            Insufficient wallet balance — please recharge ₹{formatMoney(invoiceCost - walletBalance)} more to pay this invoice.
-                          </p>
-                        )}
-                      </div>
-
-                      <button
-                        onClick={() => payProductionInvoice(po._id, invoiceCost)}
-                        disabled={isPaying || !hasSufficientFunds}
-                        className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold text-sm transition-colors whitespace-nowrap shadow"
-                      >
-                        {isPaying ? "Processing…" : hasSufficientFunds ? "Pay Production Invoice" : "Insufficient Balance"}
-                      </button>
+                  <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+                    <div className="text-sm">
+                      <span className="text-gray-500">Invoice Total</span>
+                      <p className="font-bold text-xl text-amber-900">₹{formatMoney(invoiceCost)}</p>
                     </div>
+                    <button
+                      onClick={() => payProductionInvoice(po._id, invoiceCost)}
+                      disabled={isPaying}
+                      className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-xl font-bold text-sm whitespace-nowrap shadow"
+                    >
+                      {isPaying ? "Processing…" : "Pay Production Invoice"}
+                    </button>
                   </div>
                 </div>
               );
             })}
 
-            {/* ---------------- SERVICE CHECKLIST ---------------- */}
-            <section className="bg-white mt-10 rounded-2xl p-8 shadow space-y-6">
-              <h2 className="text-2xl font-semibold">
-                Service Onboarding Status
-              </h2>
+            {/* ===== VIEWS ===== */}
+            {activeView === "home" && (
+              <HomeView
+                profile={profile}
+                branches={branches}
+                homeBranch={homeBranch}
+                setHomeBranch={setHomeBranch}
+                submittedMenu={submittedMenu}
+                onOpenMenu={() => {
+                  setMenuBranchCode(homeBranch);
+                  setShowEnterMenu(true);
+                }}
+                onOpenLogo={() => setShowLogoModal(true)}
+              />
+            )}
 
-              {servicesLoading && (
-                <p className="text-gray-500">Loading services…</p>
-              )}
+            {activeView === "onboarding" && <OnboardingView />}
 
-              {!servicesLoading && services.length === 0 && (
-                <p className="text-gray-500">
-                  No services assigned yet.
-                </p>
-              )}
+            {activeView === "sop" && <SopView />}
 
-              <div className="space-y-3">
-                {services.map((service, idx) => (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between border rounded-lg p-4"
-                  >
-                    <div>
-                      <p className="font-medium">{service.name}</p>
-
-                      {service.completed && service.completedAt && (
-                        <p className="text-xs text-gray-500">
-                          Completed on{" "}
-                          {new Date(service.completedAt).toLocaleDateString()}
-                        </p>
-                      )}
-                    </div>
-
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        service.completed
-                          ? "bg-green-100 text-green-700"
-                          : "bg-yellow-100 text-yellow-700"
-                      }`}
-                    >
-                      {service.completed ? "Completed" : "Pending"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-
-
-            <div className="mt-6 grid md:grid-cols-3 gap-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Branches
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {BRANCH_OPTIONS.map((b) => (
-                    <label key={b} className="flex gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={selectedBranches.includes(b)}
-                        onChange={() => handleBranchChange(b)}
-                      />
-                      {BRANCH_LABELS[b]}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Date</label>
-                <input
-                  type="date"
-                  value={day}
-                  onChange={(e) => setDay(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  onClick={fetchAnalytics}
-                  className="w-full bg-black text-white py-2 rounded-lg"
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
-          </header>
-
-          {showWallet && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-            <div className="bg-white p-8 rounded-xl w-96 space-y-4">
-              <h2 className="text-xl font-bold">Wallet</h2>
-              <p className="text-lg">Balance: ₹{formatMoney(wallet?.balance)}</p>
-              <button
-                onClick={() => setShowTransactions(true)}
-                className="w-full border py-2 rounded"
-              >
-                View Transactions
-              </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => startRecharge(500)}
-                  className="flex-1 bg-black text-white py-2 rounded"
-                >
-                  ₹500
-                </button>
-                <button
-                  onClick={() => startRecharge(1000)}
-                  className="flex-1 bg-black text-white py-2 rounded"
-                >
-                  ₹1000
-                </button>
-              </div>
-
-              <div>
-                <input
-                  type="number"
-                  min="10"
-                  placeholder="Enter custom amount"
-                  value={customAmount}
-                  onChange={(e) => setCustomAmount(e.target.value)}
-                  className="w-full border p-2 rounded mt-3"
-                />
-                <button
-                  onClick={() => startRecharge(Number(customAmount))}
-                  disabled={!customAmount || Number(customAmount) < 10}
-                  className="w-full bg-green-600 text-white py-2 rounded mt-2 disabled:opacity-40"
-                >
-                  Add ₹{customAmount || 0}
-                </button>
-              </div>
-
-              <button
-                onClick={() => setShowWallet(false)}
-                className="w-full border py-2 rounded"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-        
-
-
-        {showTransactions && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-            <div className="bg-white p-6 rounded-xl w-[500px] max-h-[80vh] overflow-y-auto">
-              <h2 className="text-xl font-bold mb-4">Wallet Transactions</h2>
-
-              {transactions.length === 0 && (
-                <p className="text-gray-500">No transactions yet</p>
-              )}
-
-              <div className="space-y-3">
-                {transactions.map((tx, i) => (
-                  <div
-                    key={i}
-                    className="flex justify-between border p-3 rounded-lg"
-                  >
-                    <div>
-                      <p className="font-medium">
-                        {tx.type === "credit" ? "➕ Credit" : "➖ Debit"}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {tx.reason || tx.source}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {new Date(tx.date).toLocaleString()}
-                      </p>
-                    </div>
-
-                    <div
-                      className={`font-bold ${
-                        tx.type === "credit" ? "text-green-600" : "text-red-600"
-                      }`}
-                    >
-                      ₹{tx.amount}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                onClick={() => setShowTransactions(false)}
-                className="w-full mt-4 border py-2 rounded"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-
-        {showOrders && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-            <div className="bg-white p-6 rounded-xl w-[90vw] max-w-4xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">My Orders</h2>
-                <button
-                  onClick={() => setShowOrders(false)}
-                  className="text-gray-500 hover:text-black text-2xl"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {ordersLoading ? (
-                <p className="text-gray-500 text-center py-8">Loading orders...</p>
-              ) : orders.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">No orders placed yet</p>
+            {activeView === "projections" &&
+              (isLive ? (
+                <LockedNotice message="Redirecting to projections…" />
               ) : (
-                <div className="space-y-4">
-                  {orders.map((order) => (
-                    <div
-                      key={order._id}
-                      className={`border rounded-lg p-4 ${
-                        order.status === "COMPLETED" && !order.isReceived
-                          ? "bg-green-50 border-green-300"
-                          : ""
-                      }`}
-                    >
-                      {/* ORDER HEADER */}
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <p className="font-semibold text-lg">
-                            Order #{order._id.slice(-6).toUpperCase()}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            Placed: {new Date(order.createdAt).toLocaleString()}
-                          </p>
-                          {order.status === "COMPLETED" && (
-                            <p className="text-sm text-green-600 font-medium mt-1">
-                              ✓ Completed{order.completedAt ? `: ${new Date(order.completedAt).toLocaleString()}` : ""}
-                            </p>
-                          )}
-                          {order.isReceived && order.receivedAt && (
-                            <p className="text-sm text-blue-600 font-medium mt-1">
-                              ✓ Received: {new Date(order.receivedAt).toLocaleString()}
-                            </p>
-                          )}
-                        </div>
+                <LockedNotice message="Projections unlock once your brand goes live." />
+              ))}
 
-                        <div className="text-right">
-                          <span
-                            className={`text-xs px-3 py-1 rounded-full font-semibold ${
-                              order.status === "PLACED"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : order.status === "PREPARING"
-                                ? "bg-blue-100 text-blue-800"
-                                : order.status === "COMPLETED"
-                                ? "bg-green-100 text-green-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}
-                          >
-                            {order.status}
-                          </span>
-                          <p className="font-bold text-lg mt-2">
-                            ₹{formatMoney(order.amount)}
-                          </p>
-                        </div>
-                      </div>
+            {activeView === "dailyStock" && <DailyStockView />}
 
-                      {/* ITEMS */}
-                      <div className="mb-3">
-                        <p className="text-sm font-medium text-gray-700 mb-2">Items:</p>
-                        <ul className="space-y-1">
-                          {order.items.map((item, idx) => (
-                            <li key={idx} className="text-sm text-gray-600">
-                              {item.qty} × {item.dish} - ₹{formatMoney(item.total || item.price * item.qty)}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+            {activeView === "auditHistory" &&
+              (isLive ? (
+                <AuditHistoryView />
+              ) : (
+                <LockedNotice message="Audit history unlocks once your brand goes live." />
+              ))}
 
-                      {/* COMPLETED NOTIFICATION */}
-                      {order.status === "COMPLETED" && !order.isReceived && (
-                        <div className="bg-green-100 border border-green-300 text-green-800 p-3 rounded-lg mb-3">
-                          <p className="font-semibold">
-                            🎉 Your order is ready! Please mark as received once you receive the materials.
-                          </p>
-                        </div>
-                      )}
+            {activeView === "fcr" && <FcrView />}
 
-                      {/* RECEIVED BUTTON */}
-                      {order.status === "COMPLETED" && !order.isReceived && (
-                        <button
-                          onClick={() => markAsReceived(order._id)}
-                          className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-semibold transition-colors"
-                        >
-                          Mark as Received
-                        </button>
-                      )}
+            {activeView === "analyticsDaily" &&
+              (isLive ? (
+                <DailyAnalyticsView branches={branches} />
+              ) : (
+                <LockedNotice message="Per-day analytics unlock once your brand goes live." />
+              ))}
 
-                      {order.isReceived && (
-                        <div className="bg-blue-100 border border-blue-300 text-blue-800 p-2 rounded text-sm text-center">
-                          ✓ Order received and confirmed
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+            {activeView === "analyticsRange" &&
+              (isLive ? (
+                <RangeAnalyticsView branches={branches} />
+              ) : (
+                <LockedNotice message="Date-range analytics unlock once your brand goes live." />
+              ))}
 
-              <button
-                onClick={() => setShowOrders(false)}
-                className="w-full mt-6 border py-2 rounded-lg hover:bg-gray-50"
-              >
-                Close
-              </button>
-            </div>
+            {activeView === "invoices" && <InvoicesView branches={branches} />}
+
+            {activeView === "grns" && <GrnView />}
+
+            {activeView === "profile" && <ProfileView profile={profile} onChangeLogo={() => setShowLogoModal(true)} />}
           </div>
-        )}
-
-
-          {/* ---------------- DAILY ANALYTICS (UNCHANGED) ---------------- */}
-          {loading && <p className="text-center">Loading…</p>}
-
-          {analytics && !loading && (
-            <div className="bg-[#111] text-white rounded-2xl p-8 space-y-10">
-              <h2 className="text-3xl font-bold">Per Day Analytics</h2>
-
-              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
-                <Stat title="Total Orders" value={totalOrders} />
-                <Stat title="Total Revenue" value={formatCurrency(revenue)} />
-                <Stat title="Net Revenue" value={formatCurrency(netRevenue)} />
-                <Stat title="Total Taxes" value={formatCurrency(taxTotal)} />
-                <Stat
-                  title="Total Discounts"
-                  value={formatCurrency(discountTotal)}
-                />
-                <Stat title="Avg Order Value" value={formatCurrency(aov)} />
-                <Stat
-                  title="Revenue / Order"
-                  value={formatCurrency(revenuePerOrder)}
-                />
-                <Stat title="Items / Order" value={itemsPerOrder} />
-                <Stat
-                  title="Avg Item Selling Price"
-                  value={formatCurrency(avgItemSellingPrice)}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ---------------- CLIENT ANALYTICS ---------------- */}
-          <section className="bg-[url('./assets/Main-bg.png')] bg-cover bg-center bg-no-repeat rounded-2xl p-8 shadow space-y-6">
-            
-
-            <div className="grid md:grid-cols-3 gap-6">
-              
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="border rounded-lg px-3 py-2"
-              />
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="border rounded-lg px-3 py-2"
-              />
-              <button
-                onClick={fetchClientAnalytics}
-                className="bg-black text-white rounded-lg"
-              >
-                Fetch
-              </button>
-            </div>
-
-            {clientLoading && (
-              <p className="text-center">Loading client analytics…</p>
-            )}
-
-            {clientAnalytics && (
-              <AnalyticsBlock data={clientAnalytics} />
-            )}
-          </section>
         </div>
       </div>
 
-      {/* ENTER MENU MODAL */}
+      {/* ===== LOGO MODAL ===== */}
+      {showLogoModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl w-96 space-y-4">
+            <h2 className="text-xl font-bold">Change Logo</h2>
+            <p className="text-sm text-gray-500">
+              Choose a logo from your device. PNG, JPG, JPEG or SVG — max 2MB.
+            </p>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml"
+              onChange={onLogoFileChange}
+              className="w-full border p-2 rounded text-sm"
+            />
+            {logoFile && (
+              <p className="text-xs text-gray-600">
+                {logoFile.name} — {(logoFile.size / 1024).toFixed(0)} KB
+              </p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowLogoModal(false);
+                  setLogoFile(null);
+                }}
+                className="flex-1 border py-2 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveLogo}
+                disabled={logoSaving || !logoFile}
+                className="flex-1 bg-black text-white py-2 rounded disabled:opacity-50"
+              >
+                {logoSaving ? "Uploading…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ENTER MENU MODAL (reused) ===== */}
       {showEnterMenu && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-2xl w-[95vw] max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex justify-between items-center p-6 border-b">
               <h2 className="text-2xl font-bold">Enter Menu</h2>
-              <button
-                onClick={() => setShowEnterMenu(false)}
-                className="text-gray-500 hover:text-black text-2xl"
-              >
+              <button onClick={() => setShowEnterMenu(false)} className="text-gray-500 hover:text-black text-2xl">
                 ✕
               </button>
             </div>
             <div className="flex-1 overflow-auto p-6">
               <div className="mb-4 max-w-xs">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Kitchen Branch
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Kitchen Branch</label>
                 <select
-                  required
                   value={menuBranchCode}
                   onChange={(e) => setMenuBranchCode(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
                 >
                   <option value="">Select branch…</option>
-                  {MENU_BRANCH_OPTIONS.map((b) => (
-                    <option key={b.value} value={b.value}>
-                      {b.label}
+                  {branches.map((b) => (
+                    <option key={b.branchCode} value={b.branchCode}>
+                      {b.displayName}
                     </option>
                   ))}
                 </select>
@@ -1158,7 +552,7 @@ export default function Dashboard() {
                       <th className="p-2 text-left">Recipe Name</th>
                       <th className="p-2 text-center w-28">Quantity</th>
                       <th className="p-2 text-center w-24">UOM</th>
-                      <th className="p-2 text-center w-40">Online Selling Price (₹).        </th>
+                      <th className="p-2 text-center w-40">Online Selling Price (₹)</th>
                       <th className="p-2 w-16"></th>
                     </tr>
                   </thead>
@@ -1246,7 +640,7 @@ export default function Dashboard() {
               </div>
               <button
                 type="button"
-                onClick={() => setMenuRows((prev) => [...prev, { recipeName: "", qty: 1, cost: 0 }])}
+                onClick={() => setMenuRows((prev) => [...prev, { recipeName: "", qty: 1, uom: "PC", cost: 0 }])}
                 className="mt-4 text-blue-600 text-sm hover:underline"
               >
                 + Add Row
@@ -1264,33 +658,7 @@ export default function Dashboard() {
                 type="button"
                 disabled={menuSaving}
                 className="px-4 py-2 text-sm rounded-lg bg-black text-white disabled:opacity-50 hover:bg-gray-800"
-                onClick={async () => {
-                  const items = menuRows
-                    .map((row) => ({
-                      recipeName: String(row.recipeName || "").trim(),
-                      qty: Number(row.qty || 0),
-                      uom: String(row.uom || "").trim(),
-                      cost: Number(row.cost || 0),
-                    }))
-                    .filter((row) => row.recipeName && row.qty > 0 && row.uom);
-                  if (items.length === 0) return;
-                  if (!menuBranchCode) {
-                    toast.error("Please select a kitchen branch");
-                    return;
-                  }
-                  try {
-                    setMenuSaving(true);
-                    await api.post("/api/menu-entries", { items, branchCode: menuBranchCode });
-                    setShowEnterMenu(false);
-                    setMenuRows([{ recipeName: "", qty: 1, uom: "GM", cost: 0 }]);
-                    setMenuBranchCode("");
-                    toast.success("Menu submitted successfully");
-                  } catch (err) {
-                    toast.error(err.response?.data?.message || "Failed to save menu");
-                  } finally {
-                    setMenuSaving(false);
-                  }
-                }}
+                onClick={submitMenu}
               >
                 {menuSaving ? "Saving..." : "Save"}
               </button>
@@ -1298,68 +666,941 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
     </Layout>
   );
 }
 
-/* ---------------- CLIENT ANALYTICS BLOCK ---------------- */
-function AnalyticsBlock({ data }) {
-  const format = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
-
-  const totalOrders = data?.noOfSales ?? 0;
-  const revenue = data?.revenue ?? 0;
-  const netRevenue = data?.netAmount ?? 0;
-  const taxTotal = data?.taxTotal ?? 0;
-  const discountTotal = data?.discountTotal ?? 0;
-  const aov = data?.avgSaleAmount ?? 0;
-
-  const revenuePerOrder = aov;
-
-  const totalItemQty =
-    data?.items?.reduce((s, i) => s + Number(i.quantity || 0), 0) || 0;
-
-  const totalItemNet =
-    data?.items?.reduce((s, i) => s + Number(i.netAmount || 0), 0) || 0;
-
-  const itemsPerOrder =
-    totalOrders ? (totalItemQty / totalOrders).toFixed(2) : "—";
-
-  const avgItemSellingPrice =
-    totalItemQty ? (totalItemNet / totalItemQty).toFixed(2) : "—";
+/* ============================================================
+ * HOME VIEW
+ * ========================================================== */
+function HomeView({ profile, branches, homeBranch, setHomeBranch, submittedMenu, onOpenMenu, onOpenLogo }) {
+  const brandName = profile?.brandName || "Your Brand";
+  const menuItemsForBranch = submittedMenu.flatMap((entry) => entry.items || []);
 
   return (
-    <div className="bg-[#111] text-white rounded-2xl p-8">
-      <h2 className="text-3xl font-bold">Analytics (Date Range)</h2>
-      <br />
-      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
-        <Stat title="Total Orders" value={totalOrders} />
-        <Stat title="Total Revenue" value={format(revenue)} />
-        <Stat title="Net Revenue" value={format(netRevenue)} />
-        <Stat title="Total Taxes" value={format(taxTotal)} />
-        <Stat title="Total Discounts" value={format(discountTotal)} />
-        <Stat title="Avg Order Value" value={format(aov)} />
-        <Stat
-          title="Revenue / Order"
-          value={format(revenuePerOrder)}
-        />
-        <Stat title="Items / Order" value={itemsPerOrder} />
-        <Stat
-          title="Avg Item Selling Price"
-          value={format(avgItemSellingPrice)}
+    <div className="space-y-6">
+      {/* Brand header */}
+      <header className="rounded-2xl bg-white p-8 shadow flex items-center gap-6">
+        <button
+          onClick={onOpenLogo}
+          className="w-20 h-20 rounded-full bg-slate-100 border flex items-center justify-center overflow-hidden shrink-0"
+          title="Change logo"
+        >
+          {profile?.logoUrl ? (
+            <img src={profile.logoUrl} alt="logo" className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-2xl text-gray-400">＋</span>
+          )}
+        </button>
+        <div className="flex-1">
+          <p className="text-xs uppercase tracking-widest text-slate-500">Brand Dashboard</p>
+          <h1 className="text-3xl font-semibold">{brandName}</h1>
+        </div>
+      </header>
+
+      {/* Horizontal branch selector */}
+      <div className="bg-white rounded-2xl p-5 shadow">
+        <p className="text-xs font-medium text-gray-500 mb-2">Select Branch</p>
+        <div className="flex flex-wrap gap-2">
+          {branches.map((b) => (
+            <button
+              key={b.branchCode}
+              onClick={() => setHomeBranch(b.branchCode)}
+              className={`px-4 py-2 rounded-lg text-sm border ${
+                homeBranch === b.branchCode
+                  ? "bg-black text-white border-black"
+                  : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              {b.displayName}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Menu section (focal) */}
+      <section className="bg-white rounded-2xl p-8 shadow space-y-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold">Menu</h2>
+            <p className="text-sm text-gray-500">
+              {BRANCH_DISPLAY[homeBranch] || homeBranch || "—"}
+            </p>
+          </div>
+          <button onClick={onOpenMenu} className="bg-black text-white px-5 py-2.5 rounded-lg text-sm font-medium">
+            + Enter Menu
+          </button>
+        </div>
+
+        {menuItemsForBranch.length === 0 ? (
+          <p className="text-gray-500 text-sm">No menu submitted for this branch yet.</p>
+        ) : (
+          <div className="border rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="p-2 text-left">Recipe</th>
+                  <th className="p-2 text-right">Qty</th>
+                  <th className="p-2 text-left">UOM</th>
+                  <th className="p-2 text-right">Selling Price (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {menuItemsForBranch.map((it, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="p-2 font-medium">{it.recipeName}</td>
+                    <td className="p-2 text-right">{it.qty}</td>
+                    <td className="p-2 uppercase text-xs text-gray-500">{it.uom}</td>
+                    <td className="p-2 text-right">{formatMoney(it.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/* ============================================================
+ * ONBOARDING VIEW
+ * ========================================================== */
+function OnboardingView() {
+  const [data, setData] = useState({ lifecycleStage: "", tasks: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .get("/api/client/onboarding-status")
+      .then((res) => setData(res.data))
+      .catch(() => setData({ lifecycleStage: "", tasks: [] }))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-6">
+      <h2 className="text-2xl font-semibold">Service Onboarding Status</h2>
+      {loading && <p className="text-gray-500">Loading…</p>}
+      {!loading && data.tasks.length === 0 && (
+        <p className="text-gray-500">No onboarding tasks assigned yet.</p>
+      )}
+      <div className="space-y-3">
+        {data.tasks.map((t, idx) => (
+          <div key={idx} className="flex items-center justify-between border rounded-lg p-4">
+            <p className="font-medium">{t.taskName}</p>
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                t.status === "COMPLETED" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
+              }`}
+            >
+              {t.status === "COMPLETED" ? "Completed" : "Pending"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ============================================================
+ * SOP DOCUMENTS VIEW (read-only)
+ * The POC enters these (title + link) via the POC dashboard; the client reads
+ * back their own list here. No lifecycle gate, no add/edit/delete — read-only.
+ * ========================================================== */
+function SopView() {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .get("/api/client/sop")
+      .then((res) => setDocuments(res.data?.documents || []))
+      .catch(() => setDocuments([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-6">
+      <h2 className="text-2xl font-semibold">SOP Documents</h2>
+      {loading && <p className="text-gray-500">Loading…</p>}
+      {!loading && documents.length === 0 && (
+        <p className="text-gray-500">Your SOPs will appear here as your POC finalises them.</p>
+      )}
+      <div className="space-y-3">
+        {documents.map((doc, idx) => (
+          <div key={idx} className="flex items-center justify-between border rounded-lg p-4">
+            <p className="font-semibold">{doc.title}</p>
+            <a
+              href={doc.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 underline text-sm font-medium"
+            >
+              Open SOP
+            </a>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ============================================================
+ * DAILY STOCK VIEW (brand-wide, no branch dropdown)
+ * ========================================================== */
+function DailyStockView() {
+  const [date, setDate] = useState("");
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/api/client/daily-stock", { params: date ? { date } : {} });
+      setRows(res.data?.data || []);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [date]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-2xl font-semibold">Daily Stock</h2>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="border rounded-lg px-3 py-2 text-sm"
         />
       </div>
-    </div>
+      <p className="text-xs text-gray-400">Shown brand-wide (not branch-specific).</p>
+
+      {loading && <p className="text-gray-500">Loading…</p>}
+      {!loading && rows.length === 0 && <p className="text-gray-500">No stock records found.</p>}
+
+      {rows.map((r) => (
+        <div key={r._id} className="border rounded-lg overflow-hidden">
+          <div className="bg-gray-100 px-4 py-2 text-sm font-semibold">{r.date}</div>
+          <table className="w-full text-sm">
+            <thead className="bg-white border-b">
+              <tr>
+                <th className="p-2 text-left">Item</th>
+                <th className="p-2 text-left">UOM</th>
+                <th className="p-2 text-right">Issued</th>
+                <th className="p-2 text-right">Used</th>
+                <th className="p-2 text-right">Wastage</th>
+                <th className="p-2 text-right">Remaining</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(r.items || []).map((it, i) => (
+                <tr key={i} className="border-t">
+                  <td className="p-2 font-medium">{it.itemName}</td>
+                  <td className="p-2 uppercase text-xs text-gray-500">{it.uom}</td>
+                  <td className="p-2 text-right">{it.issueQty}</td>
+                  <td className="p-2 text-right">{it.usedQty}</td>
+                  <td className="p-2 text-right">{it.wastageQty}</td>
+                  <td className="p-2 text-right font-semibold">{it.remainingQty}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </section>
   );
 }
 
-/* ---------------- KPI TILE ---------------- */
-function Stat({ title, value }) {
+/* ============================================================
+ * AUDIT HISTORY VIEW (read-only, LIVE-gated) — three sections:
+ *   Warehouse (brand-wide) · Local Kitchen (per branch) · Base Kitchen.
+ * Reads only LOCKED audits. When all three are empty (common right after
+ * go-live) a single welcome empty-state replaces the three empty cards.
+ * ========================================================== */
+
+// One audit's item table. Non-zero variance rows are highlighted amber and
+// show the reason + note.
+function AuditItemsTable({ items }) {
+  if (!items || items.length === 0) {
+    return <p className="p-3 text-sm text-gray-500">No items in this audit.</p>;
+  }
   return (
-    <div className="bg-[#181818] p-6 rounded-xl border border-gray-700">
-      <p className="text-gray-400 text-xs uppercase mb-2">{title}</p>
-      <p className="text-3xl font-bold">{value ?? "—"}</p>
+    <table className="w-full text-sm">
+      <thead className="bg-white border-b">
+        <tr>
+          <th className="p-2 text-left">Item</th>
+          <th className="p-2 text-left">UOM</th>
+          <th className="p-2 text-right">Expected</th>
+          <th className="p-2 text-right">Actual</th>
+          <th className="p-2 text-right">Variance</th>
+          <th className="p-2 text-left">Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((it, i) => {
+          const hasVar = Number(it.varianceQty) !== 0;
+          return (
+            <tr key={i} className={`border-t ${hasVar ? "bg-amber-50" : ""}`}>
+              <td className="p-2 font-medium">{it.itemName}</td>
+              <td className="p-2 uppercase text-xs text-gray-500">{it.uom}</td>
+              <td className="p-2 text-right">{it.expectedQty}</td>
+              <td className="p-2 text-right">{it.actualQty}</td>
+              <td className={`p-2 text-right font-semibold ${hasVar ? "text-amber-700" : "text-gray-500"}`}>
+                {it.varianceQty > 0 ? `+${it.varianceQty}` : it.varianceQty}
+              </td>
+              <td className="p-2 text-xs">
+                {it.reason ? (
+                  <span>
+                    <span className="font-medium">{it.reason}</span>
+                    {it.reasonNote ? <span className="text-gray-500"> — {it.reasonNote}</span> : null}
+                  </span>
+                ) : (
+                  <span className="text-gray-300">—</span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// One locked audit document (date header + lock/correction badges + table).
+function AuditCard({ audit }) {
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      <div className="bg-gray-100 px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
+        <span className="text-sm font-semibold">{audit.date}</span>
+        <span className="flex items-center gap-2">
+          {audit.correctionSeq > 0 && (
+            <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+              Correction #{audit.correctionSeq}
+            </span>
+          )}
+          <span className="text-[10px] uppercase tracking-wide bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+            Locked
+          </span>
+          {audit.lockedAt && (
+            <span className="text-xs text-gray-500">{new Date(audit.lockedAt).toLocaleString()}</span>
+          )}
+        </span>
+      </div>
+      <AuditItemsTable items={audit.items} />
     </div>
   );
 }
 
+function AuditHistoryView() {
+  const [from, setFrom] = useState(() =>
+    new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  );
+  const [to, setTo] = useState(today());
+  const [warehouse, setWarehouse] = useState([]);
+  const [local, setLocal] = useState([]); // [{ branchCode, branchDisplayName, audits: [] }]
+  const [base, setBase] = useState([]);
+  const [branchFilter, setBranchFilter] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const params = { from, to };
+    try {
+      const [w, l, b] = await Promise.all([
+        api.get("/api/client/audits/warehouse", { params }),
+        api.get("/api/client/audits/local-kitchen", { params }),
+        api.get("/api/client/audits/base-kitchen", { params }),
+      ]);
+      setWarehouse(w.data?.data || []);
+      setLocal(l.data?.data || []);
+      setBase(b.data?.data || []);
+    } catch {
+      setWarehouse([]);
+      setLocal([]);
+      setBase([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [from, to]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const localHasAny = local.some((grp) => (grp.audits || []).length > 0);
+  const allEmpty = !loading && warehouse.length === 0 && base.length === 0 && !localHasAny;
+
+  const visibleLocal = branchFilter
+    ? local.filter((grp) => grp.branchCode === branchFilter)
+    : local;
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-2xl font-semibold">Audit History</h2>
+        <div className="flex items-center gap-2 text-sm">
+          <label className="text-gray-500">From</label>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="border rounded-lg px-3 py-2" />
+          <label className="text-gray-500">To</label>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="border rounded-lg px-3 py-2" />
+        </div>
+      </div>
+
+      {loading && <p className="text-gray-500">Loading…</p>}
+
+      {allEmpty && (
+        <div className="bg-slate-50 border border-gray-200 rounded-xl p-10 text-center">
+          <h3 className="text-lg font-semibold">No audit history yet</h3>
+          <p className="text-gray-500 text-sm mt-1">
+            Audits will appear here once your Store Manager and kitchen chefs complete their first daily audits.
+          </p>
+        </div>
+      )}
+
+      {!loading && !allEmpty && (
+        <>
+          {/* A. Warehouse — brand-wide */}
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">Warehouse Audits</h3>
+            <p className="text-xs text-gray-400">Shown brand-wide (one central warehouse).</p>
+            {warehouse.length === 0 ? (
+              <p className="text-gray-500 text-sm">No warehouse audits in this range.</p>
+            ) : (
+              warehouse.map((a, i) => <AuditCard key={`wh-${i}`} audit={a} />)
+            )}
+          </div>
+
+          {/* B. Local Kitchen — per branch */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <h3 className="text-lg font-semibold">Local Kitchen Audits</h3>
+              {local.length > 1 && (
+                <select
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  className="border rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">All branches</option>
+                  {local.map((grp) => (
+                    <option key={grp.branchCode} value={grp.branchCode}>
+                      {grp.branchDisplayName}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {visibleLocal.map((grp) => (
+              <div key={grp.branchCode} className="space-y-2">
+                <h4 className="text-sm font-semibold text-gray-700">{grp.branchDisplayName}</h4>
+                {(grp.audits || []).length === 0 ? (
+                  <p className="text-gray-500 text-sm">No audits yet for {grp.branchDisplayName}.</p>
+                ) : (
+                  grp.audits.map((a, i) => <AuditCard key={`${grp.branchCode}-${i}`} audit={a} />)
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* C. Base Kitchen — JP Nagar SEMI_FINISHED */}
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">Base Kitchen Audits</h3>
+            <p className="text-xs text-gray-400">Sub-recipes prepared at JP Nagar before dispatch.</p>
+            {base.length === 0 ? (
+              <p className="text-gray-500 text-sm">No base kitchen audits in this range.</p>
+            ) : (
+              base.map((a, i) => <AuditCard key={`bk-${i}`} audit={a} />)
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+/* ============================================================
+ * FCR VIEW (brand-wide, no branch dropdown) — per-dish iteration timeline.
+ * Only POC-confirmed iterations are returned by the backend; a dish with
+ * zero confirmed iterations still appears, showing "Awaiting confirmation".
+ * ========================================================== */
+function FcrView() {
+  const [dishes, setDishes] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .get("/api/client/fcr/dishes")
+      .then((res) => setDishes(res.data?.dishes || []))
+      .catch(() => setDishes([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-5">
+      <h2 className="text-2xl font-semibold">Food Cost / FCR</h2>
+      <p className="text-xs text-gray-400">Shown brand-wide (not branch-specific).</p>
+      {loading && <p className="text-gray-500">Loading…</p>}
+      {!loading && <FcrIterationTimeline dishes={dishes} />}
+    </section>
+  );
+}
+
+/* ============================================================
+ * PER-DAY ANALYTICS VIEW (LIVE)
+ * ========================================================== */
+function DailyAnalyticsView({ branches }) {
+  const [branch, setBranch] = useState(branches[0]?.branchCode || "");
+  const [date, setDate] = useState(today());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!branch && branches[0]) setBranch(branches[0].branchCode);
+  }, [branches, branch]);
+
+  const fetchData = async () => {
+    if (!branch || !date) {
+      toast.info("Select a branch and date");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.get("/api/client/analytics/daily", { params: { branchCode: branch, date } });
+      setData(res.data);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to load analytics");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="space-y-5">
+      <div className="bg-white rounded-2xl p-6 shadow grid md:grid-cols-3 gap-4 items-end">
+        <BranchSelect branches={branches} value={branch} onChange={setBranch} />
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <button onClick={fetchData} className="bg-black text-white py-2 rounded-lg text-sm">Apply</button>
+      </div>
+
+      {loading && <p className="text-center">Loading…</p>}
+      {data && (
+        <div className="bg-[#111] text-white rounded-2xl p-8">
+          <h2 className="text-3xl font-bold mb-6">Per Day Analytics</h2>
+          {data.noData ? (
+            <p className="text-gray-300">No sales data for this day.</p>
+          ) : (
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
+              <Stat title="Total Orders" value={data.totalOrders} />
+              <Stat title="Total Revenue" value={formatCurrency(data.totalRevenue)} />
+              <Stat title="Net Revenue" value={formatCurrency(data.netRevenue)} />
+              <Stat title="Total Taxes" value={formatCurrency(data.totalTaxes)} />
+              <Stat title="Total Discounts" value={formatCurrency(data.totalDiscounts)} />
+              <Stat title="Avg Order Value" value={formatCurrency(data.avgOrderValue)} />
+              <Stat title="Avg Item Selling Price" value={formatCurrency(data.avgItemSellingPrice)} />
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ============================================================
+ * RANGE ANALYTICS VIEW (LIVE)
+ * ========================================================== */
+function RangeAnalyticsView({ branches }) {
+  const [branch, setBranch] = useState(branches[0]?.branchCode || "");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!branch && branches[0]) setBranch(branches[0].branchCode);
+  }, [branches, branch]);
+
+  const fetchData = async () => {
+    if (!branch || !startDate || !endDate) {
+      toast.info("Select a branch and both dates");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.get("/api/client/analytics/range", {
+        params: { branchCode: branch, startDate, endDate },
+      });
+      setData(res.data);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to load analytics");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="space-y-5">
+      <div className="bg-white rounded-2xl p-6 shadow grid md:grid-cols-4 gap-4 items-end">
+        <BranchSelect branches={branches} value={branch} onChange={setBranch} />
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <button onClick={fetchData} className="bg-black text-white py-2 rounded-lg text-sm">Fetch</button>
+      </div>
+
+      {loading && <p className="text-center">Loading…</p>}
+      {data && (
+        <div className="bg-[#111] text-white rounded-2xl p-8">
+          <h2 className="text-3xl font-bold mb-6">Analytics (Date Range)</h2>
+          {data.noData ? (
+            <p className="text-gray-300">No sales data in this range.</p>
+          ) : (
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
+              <Stat title="Total Orders" value={data.totalOrders} />
+              <Stat title="Total Revenue" value={formatCurrency(data.totalRevenue)} />
+              <Stat title="Net Revenue" value={formatCurrency(data.netRevenue)} />
+              <Stat title="Total Taxes" value={formatCurrency(data.totalTaxes)} />
+              <Stat title="Total Discounts" value={formatCurrency(data.totalDiscounts)} />
+              <Stat title="Avg Order Value" value={formatCurrency(data.avgOrderValue)} />
+              <Stat title="Avg Item Selling Price" value={formatCurrency(data.avgItemSellingPrice)} />
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ============================================================
+ * INVOICES VIEW
+ * ========================================================== */
+function InvoicesView({ branches }) {
+  const [branch, setBranch] = useState("");
+  const [invoices, setInvoices] = useState([]);
+  const [grns, setGrns] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [payingId, setPayingId] = useState(null);
+  const [viewGrnFor, setViewGrnFor] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [inv, grn] = await Promise.all([
+        api.get("/api/client/invoices", { params: branch ? { branchCode: branch } : {} }),
+        api.get("/api/client/grns").catch(() => ({ data: { data: [] } })),
+      ]);
+      setInvoices(inv.data || []);
+      setGrns(grn.data?.data || []);
+    } catch {
+      setInvoices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [branch]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Pay a manual invoice via Razorpay: pay-direct → checkout → verify-payment.
+  const payInvoice = async (inv) => {
+    if (inv.source === "PRODUCTION_ORDER") {
+      toast.info("Pay production invoices from the banner at the top of the dashboard.");
+      return;
+    }
+    setPayingId(inv.id);
+    try {
+      const { data } = await api.post(`/api/client/invoices/${inv.id}/pay-direct`);
+      const options = {
+        key: data.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: Math.round(Number(data.total) * 100),
+        currency: "INR",
+        order_id: data.razorpayOrderId,
+        name: "Skope Kitchens",
+        description: `${inv.type} Invoice`,
+        handler: async (response) => {
+          try {
+            await api.post(`/api/client/invoices/${inv.id}/verify-payment`, {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            toast.success("Invoice paid");
+            await load();
+          } catch (err) {
+            toast.error(err.response?.data?.message || "Payment verification failed");
+          } finally {
+            setPayingId(null);
+          }
+        },
+        modal: { ondismiss: () => setPayingId(null) },
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to start payment");
+      setPayingId(null);
+    }
+  };
+
+  // GRNs the client can see, indexed by linked invoice id.
+  const grnByInvoice = {};
+  grns.forEach((g) => (g.linkedInvoiceIds || []).forEach((id) => (grnByInvoice[id] = g)));
+
+  // Group manual invoices: parents carry their supplementaries; production stays flat.
+  const manual = invoices.filter((i) => i.source !== "PRODUCTION_ORDER");
+  const production = invoices.filter((i) => i.source === "PRODUCTION_ORDER");
+  const byId = Object.fromEntries(manual.map((i) => [i.id, i]));
+  const parents = manual.filter((i) => !i.parentInvoiceId || !byId[i.parentInvoiceId]);
+  const suppsByParent = {};
+  manual
+    .filter((i) => i.parentInvoiceId && byId[i.parentInvoiceId])
+    .forEach((s) => {
+      (suppsByParent[s.parentInvoiceId] = suppsByParent[s.parentInvoiceId] || []).push(s);
+    });
+
+  const renderRow = (inv, isSupp = false) => {
+    const grn = grnByInvoice[inv.id];
+    return (
+      <div
+        key={`${inv.source}-${inv.id}`}
+        className={`flex flex-wrap items-center justify-between gap-3 py-3 ${isSupp ? "pl-5 border-l-2 border-purple-200" : ""}`}
+      >
+        <div className="text-sm">
+          <span className="font-medium">
+            {isSupp ? "Supplementary" : inv.type}
+            {inv.source === "PRODUCTION_ORDER" && <span className="ml-1 text-xs text-amber-600">(production)</span>}
+          </span>{" "}
+          <span className="text-gray-700">₹{formatMoney(inv.total ?? inv.amount)}</span>
+          {Number(inv.commission) > 0 && (
+            <span className="text-xs text-gray-400 ml-1">
+              (incl. ₹{formatMoney(inv.commission)} commission)
+            </span>
+          )}
+          {isSupp && inv.supplementaryReason && (
+            <span className="text-xs text-gray-500 ml-1">— {inv.supplementaryReason}</span>
+          )}
+          {inv.attachmentUrl && (
+            <a href={inv.attachmentUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline ml-2">
+              {inv.attachmentName || "attachment"}
+            </a>
+          )}
+          {inv.notes && <div className="text-xs text-gray-400">{inv.notes}</div>}
+        </div>
+        <div className="flex items-center gap-3">
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-semibold ${
+              inv.status === "PAID" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
+            }`}
+          >
+            {inv.status}
+          </span>
+          {inv.status === "PAID" && grn && (
+            <button onClick={() => setViewGrnFor(grn)} className="text-xs text-blue-600 underline">
+              View GRN
+            </button>
+          )}
+          {inv.status === "UNPAID" && inv.source !== "PRODUCTION_ORDER" && (
+            <button
+              onClick={() => payInvoice(inv)}
+              disabled={payingId === inv.id}
+              className="bg-black text-white px-4 py-1.5 rounded-lg text-xs disabled:opacity-50"
+            >
+              {payingId === inv.id ? "Paying…" : "Pay Now"}
+            </button>
+          )}
+          {inv.status === "UNPAID" && inv.source === "PRODUCTION_ORDER" && (
+            <span className="text-xs text-gray-400">Pay from banner ↑</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-2xl font-semibold">Invoices</h2>
+        <select value={branch} onChange={(e) => setBranch(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+          <option value="">All branches</option>
+          {branches.map((b) => (
+            <option key={b.branchCode} value={b.branchCode}>
+              {b.displayName}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {loading && <p className="text-gray-500">Loading…</p>}
+      {!loading && invoices.length === 0 && <p className="text-gray-500">No invoices yet.</p>}
+
+      {!loading && invoices.length > 0 && (
+        <div className="divide-y">
+          {parents.map((p) => (
+            <div key={p.id}>
+              {renderRow(p)}
+              {(suppsByParent[p.id] || []).map((s) => renderRow(s, true))}
+            </div>
+          ))}
+          {production.map((p) => renderRow(p))}
+        </div>
+      )}
+
+      {viewGrnFor && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setViewGrnFor(null)}>
+          <div className="bg-white p-6 rounded-xl w-[640px] max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Goods Received Note</h3>
+              <button onClick={() => setViewGrnFor(null)} className="text-gray-400 hover:text-black">
+                ✕
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-3">Received {new Date(viewGrnFor.date).toLocaleDateString()}</p>
+            <GrnItemsTable items={viewGrnFor.items} />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ============================================================
+ * GOODS RECEIVED NOTES VIEW (read-only)
+ * ========================================================== */
+function GrnItemsTable({ items }) {
+  return (
+    <div className="border rounded-lg overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-100">
+          <tr>
+            <th className="p-2 text-left">Ingredient</th>
+            <th className="p-2 text-left">Vendor</th>
+            <th className="p-2 text-right">Received</th>
+            <th className="p-2 text-left">UOM</th>
+            <th className="p-2 text-right">Unit Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(items || []).map((it, i) => (
+            <tr key={i} className="border-t">
+              <td className="p-2 font-medium">{it.itemName}</td>
+              <td className="p-2 text-gray-500">{it.vendorName || "—"}</td>
+              <td className="p-2 text-right">{formatMoney(it.receivedQty)}</td>
+              <td className="p-2 uppercase text-xs text-gray-500">{it.uom}</td>
+              <td className="p-2 text-right">₹{formatMoney(it.finalUnitPrice)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function GrnView() {
+  const [grns, setGrns] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get("/api/client/grns");
+        setGrns(res.data?.data || []);
+      } catch {
+        setGrns([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-5">
+      <h2 className="text-2xl font-semibold">Goods Received Notes</h2>
+      <p className="text-sm text-gray-500">
+        Purchases linked to your paid procurement invoices. Each note appears once the related invoice(s) are paid
+        and the received quantity has been confirmed.
+      </p>
+
+      {loading && <p className="text-gray-500">Loading…</p>}
+      {!loading && grns.length === 0 && <p className="text-gray-500">No goods received notes yet.</p>}
+
+      <div className="space-y-5">
+        {grns.map((g) => (
+          <div key={g.grnId} className="border rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold">GRN · {new Date(g.date).toLocaleDateString()}</span>
+              <span className="text-xs text-gray-400">
+                {(g.linkedInvoiceIds || []).map((id) => `INV-${id.slice(-4).toUpperCase()}`).join(", ")}
+              </span>
+            </div>
+            <GrnItemsTable items={g.items} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ============================================================
+ * PROFILE VIEW
+ * ========================================================== */
+function ProfileView({ profile, onChangeLogo }) {
+  const stageLabel = {
+    AWAITING_MENU: "Awaiting Menu",
+    IN_TRIAL: "In Trial",
+    LIVE: "Live",
+  };
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-6 max-w-2xl">
+      <h2 className="text-2xl font-semibold">Profile</h2>
+      <div className="flex items-center gap-5">
+        <div className="w-20 h-20 rounded-full bg-slate-100 border flex items-center justify-center overflow-hidden">
+          {profile?.logoUrl ? (
+            <img src={profile.logoUrl} alt="logo" className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-lg text-gray-400">{(profile?.brandName || "?").charAt(0)}</span>
+          )}
+        </div>
+        <button onClick={onChangeLogo} className="border px-4 py-2 rounded-lg text-sm hover:bg-gray-50">
+          Change Logo
+        </button>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4 text-sm">
+        <Field label="Brand Name" value={profile?.brandName} />
+        <Field label="Company" value={profile?.company} />
+        <Field label="Email" value={profile?.email} />
+        <Field label="Mobile" value={profile?.mobile} />
+        <Field label="Lifecycle Stage" value={stageLabel[profile?.lifecycleStage] || profile?.lifecycleStage} />
+        <Field
+          label="Assigned Branches"
+          value={(profile?.assignedBranches || []).map((c) => BRANCH_DISPLAY[c] || c).join(", ")}
+        />
+      </div>
+    </section>
+  );
+}
+
+function Field({ label, value }) {
+  return (
+    <div className="border rounded-lg p-3">
+      <p className="text-xs text-gray-400">{label}</p>
+      <p className="font-medium">{value || "—"}</p>
+    </div>
+  );
+}

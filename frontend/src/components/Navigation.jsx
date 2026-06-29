@@ -48,7 +48,19 @@ const handleAvatarClick = () => {
     user?.userType ||
     "";
 
-  if (storedType === "vendor") {
+  // POC, INGREDIENT_MANAGER (Stock Manager), RECIPE_MANAGER (Head Chef) and
+  // LOCAL_KITCHEN are admin userTypes but have their own dashboards. Key off the
+  // JWT role, not userType (their userType is "admin").
+  const jwtRole = authUtils.getRole();
+  if (jwtRole === "POC") {
+    navigate("/poc");
+  } else if (jwtRole === "INGREDIENT_MANAGER") {
+    navigate("/stock-manager");
+  } else if (jwtRole === "RECIPE_MANAGER") {
+    navigate("/head-chef");
+  } else if (jwtRole === "LOCAL_KITCHEN") {
+    navigate("/local-kitchen");
+  } else if (storedType === "vendor") {
     navigate("/vendor-dashboard");
   } else if (storedType === "client") {
     navigate("/dashboard");

@@ -194,6 +194,10 @@ export default function AddTrainingRecipe() {
                   </option>
                 ))}
               </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Use the exact same dish name across all trials and training (e.g. "Chicken Roast" for
+                T1, T2, T3, TR1…) — spelling must match for the FCR comparison to group correctly.
+              </p>
             </div>
 
             <div>

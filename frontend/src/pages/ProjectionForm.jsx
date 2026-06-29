@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import api from "../utils/api";
@@ -42,12 +42,77 @@ export default function ProjectionForm() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(null); // holds the created projection on success
 
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [expandedProjections, setExpandedProjections] = useState({});
+
+  const fetchHistory = useCallback(async () => {
+    setLoadingHistory(true);
+    try {
+      const res = await api.get("/api/projections/my");
+      setHistory(res.data?.data || []);
+    } catch (err) {
+      console.error("Failed to load projection history", err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
+  const getBranchLabel = (code) => {
+    const branch = BRANCH_OPTIONS.find((b) => b.value === code);
+    return branch ? branch.label : code;
+  };
+
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case "PENDING_CHEF_REVIEW":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+            Pending Chef Review
+          </span>
+        );
+      case "CHEF_CONFIRMED":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-800 border border-blue-200">
+            Chef Confirmed
+          </span>
+        );
+      case "COMPLETED":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+            Completed
+          </span>
+        );
+      case "CANCELLED":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-50 text-rose-800 border border-rose-200">
+            Cancelled
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-gray-800 border border-gray-200">
+            {status}
+          </span>
+        );
+    }
+  };
+
+  const toggleExpand = (id) => {
+    setExpandedProjections((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
   useEffect(() => {
     api
       .get("/api/mainrecipes/dish-list")
       .then((res) => setDishes(res.data?.dishes || []))
       .catch(() => setDishes([]));
-  }, []);
+    
+    fetchHistory();
+  }, [fetchHistory]);
 
   /* ── row helpers ── */
   const updateRow = (idx, field, value) =>
@@ -87,6 +152,7 @@ export default function ProjectionForm() {
       const res = await api.post("/api/projections", { type, forDate, items, branchCode });
       setSubmitted(res.data?.data);
       toast.success("Projection submitted successfully");
+      fetchHistory();
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to submit projection");
     } finally {
@@ -353,6 +419,116 @@ export default function ProjectionForm() {
               {submitting ? "Submitting…" : "Submit Projection"}
             </button>
           </form>
+
+          {/* Projection History */}
+          <div className="mt-8 bg-white rounded-xl shadow-sm border p-6 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h2 className="text-lg font-semibold text-gray-900">Projection History</h2>
+              <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+                {history.length} {history.length === 1 ? "submission" : "submissions"}
+              </span>
+            </div>
+
+            {loadingHistory ? (
+              <div className="py-8 text-center text-gray-500 text-sm animate-pulse">
+                Loading history…
+              </div>
+            ) : history.length === 0 ? (
+              <div className="py-8 text-center text-gray-500 text-sm">
+                No previous projections submitted.
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                {history.map((proj) => {
+                  const isExpanded = !!expandedProjections[proj._id];
+                  const totalItems = proj.items?.length || 0;
+                  const totalQty = proj.items?.reduce((sum, i) => sum + (Number(i.targetQty) || 0), 0) || 0;
+                  
+                  return (
+                    <div
+                      key={proj._id}
+                      className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:border-gray-300 hover:shadow-sm transition-all duration-200"
+                    >
+                      {/* Card Header (clickable to toggle expansion) */}
+                      <div
+                        onClick={() => toggleExpand(proj._id)}
+                        className="p-4 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50/50 transition-colors"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-md ${
+                              proj.type === "WEEKLY" ? "bg-purple-100 text-purple-800" : "bg-teal-100 text-teal-800"
+                            }`}>
+                              {proj.type}
+                            </span>
+                            <span className="text-xs text-gray-400">
+                              Submitted {formatSubmittedAt(proj.submittedAt)}
+                            </span>
+                          </div>
+                          
+                          <h3 className="font-semibold text-gray-900 text-sm">
+                            Production Date:{" "}
+                            <span className="text-black font-bold">
+                              {new Date(proj.forDate).toLocaleDateString("en-IN", {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              })}
+                            </span>
+                          </h3>
+
+                          <div className="flex gap-3 text-xs text-gray-500">
+                            <span>
+                              Branch: <span className="text-gray-700 font-medium">{getBranchLabel(proj.branchCode)}</span>
+                            </span>
+                            <span>•</span>
+                            <span>
+                              {totalItems} {totalItems === 1 ? "dish" : "dishes"} ({totalQty} units total)
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          {getStatusBadge(proj.status)}
+                          <span className={`text-gray-400 text-xs transform transition-transform duration-200 ${
+                            isExpanded ? "rotate-180" : ""
+                          }`}>
+                            ▼
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Card Expanded Content */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 border-t border-gray-100 bg-slate-50/50 pt-3">
+                          <div className="border rounded-lg bg-white overflow-hidden shadow-inner">
+                            <table className="w-full text-xs text-left">
+                              <thead className="bg-gray-50 border-b text-gray-500 uppercase tracking-wider">
+                                <tr>
+                                  <th className="px-3 py-2 font-semibold">Dish Name</th>
+                                  <th className="px-3 py-2 font-semibold text-right">Target Quantity</th>
+                                  <th className="px-3 py-2 font-semibold text-center w-20">Unit</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100 text-gray-700">
+                                {proj.items.map((item, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-50/50">
+                                    <td className="px-3 py-2 font-medium text-gray-900">{item.recipeName}</td>
+                                    <td className="px-3 py-2 text-right font-semibold text-slate-800">{item.targetQty}</td>
+                                    <td className="px-3 py-2 text-center text-gray-500">{item.uom}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
         </div>
       </div>

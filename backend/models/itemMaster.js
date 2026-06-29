@@ -34,6 +34,28 @@ const itemMasterSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+    // ── Stock Manager operational thresholds (additive, brand-agnostic) ───────
+    // Owned/edited by the Stock Manager dashboard. Existing records have these
+    // as null until the Stock Manager fills them in — the UI shows "Not set".
+    // An ingredient is an ingredient, so these are not brand-scoped.
+    // shelfLifeDays drives the near-expiry highlight (within shelfLifeDays/2 of
+    // expiry); minStockLevel drives the low-stock highlight. reorderCadenceDays
+    // is intentionally NOT stored — cadence is derived from purchase history.
+    shelfLifeDays: {
+      type: Number,
+      default: null,
+    },
+    minStockLevel: {
+      type: Number,
+      default: null,
+    },
+    minStockUom: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    // ──────────────────────────────────────────────────────────────────────────
   },
   {
     timestamps: true,

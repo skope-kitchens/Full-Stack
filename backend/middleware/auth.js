@@ -5,7 +5,11 @@ import User from "../models/user.js";
 const ADMIN_ROLES = new Set([
   "WALLET_MANAGER",
   "RECIPE_MANAGER",
-  "INGREDIENT_MANAGER"
+  "INGREDIENT_MANAGER",
+  "POC",
+  // Local Kitchen operators — admin-class JWT, branch-scoped via decoded.branchCode
+  // (already carried onto req.user below). One account per kitchen.
+  "LOCAL_KITCHEN"
 ]);
 
 export const authMiddleware = async (req, res, next) => {

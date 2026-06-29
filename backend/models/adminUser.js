@@ -28,7 +28,9 @@ const adminUserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["WALLET_MANAGER", "RECIPE_MANAGER", "INGREDIENT_MANAGER"],
+      // LOCAL_KITCHEN — operator at a normal/local kitchen (Marathahalli, Kalyan
+      // Nagar, or JP Nagar's own assembly op). Branch-scoped via branchCode below.
+      enum: ["WALLET_MANAGER", "RECIPE_MANAGER", "INGREDIENT_MANAGER", "POC", "LOCAL_KITCHEN"],
       required: true,
       index: true,
     },

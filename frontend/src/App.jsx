@@ -28,6 +28,10 @@ import GoogleSuccess from "./pages/GoogleSuccess";
 import ProjectionForm from "./pages/ProjectionForm";
 import ProjectionReview from "./pages/admin/ProjectionReview";
 import FridgeAudit from "./pages/FridgeAudit";
+import PocDashboard from "./pages/PocDashboard";
+import StockManager from "./pages/StockManager";
+import HeadChef from "./pages/HeadChef";
+import LocalKitchen from "./pages/LocalKitchen";
 function App() {
   return (
     <Router
@@ -67,6 +71,10 @@ function App() {
         <Route path="/projection" element={<ProjectionForm />}/>
         <Route path="/admin/projection/:brandId" element={<ProjectionReview />}/>
         <Route path="/fridge-audit" element={<FridgeAudit />}/>
+        <Route path="/poc" element={<PocDashboard />}/>
+        <Route path="/stock-manager" element={<StockManager />}/>
+        <Route path="/head-chef" element={<HeadChef />}/>
+        <Route path="/local-kitchen" element={<LocalKitchen />}/>
       </Routes>
     </Router>
   )

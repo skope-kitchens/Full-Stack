@@ -1,5 +1,6 @@
 import Projection from "../models/projection.js";
 import ProductionOrder from "../models/productionOrder.js";
+import User from "../models/user.js";
 import MainRecipe from "../models/mainrecipe.models.js";
 import SubRecipe from "../models/subrecipe.models.js";
 import BrandStock from "../models/brandStock.js";
@@ -21,6 +22,15 @@ export const createProjection = async (req, res) => {
   try {
     if (req.user.role !== "client") {
       return res.status(403).json({ message: "Only brand clients can submit projections" });
+    }
+
+    // Lifecycle gate: projections unlock only once the brand is LIVE.
+    // Re-read from DB so a freshly-flipped stage is always honoured.
+    const lifecycleUser = await User.findById(req.user._id).select("lifecycleStage").lean();
+    if (lifecycleUser?.lifecycleStage !== "LIVE") {
+      return res.status(403).json({
+        message: "Projections unlock once your brand goes live.",
+      });
     }
 
     const { type, forDate, items, branchCode } = req.body || {};
