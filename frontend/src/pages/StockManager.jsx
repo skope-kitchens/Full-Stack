@@ -18,6 +18,7 @@ const BRANCH_DISPLAY = {
   TESTBRANCH: "Test Branch",
   MARATHAHALLI: "Marathahalli",
   KALYANNAGAR: "Kalyan Nagar",
+  JAYANAGAR: "Jayanagar",
   TESTWAREHOUSE: "Test Warehouse",
   WAREHOUSE_JPNAGAR: "JP Nagar Warehouse",
 };

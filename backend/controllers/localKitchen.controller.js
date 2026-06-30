@@ -1,10 +1,10 @@
 /**
  * localKitchen.controller.js — Local Kitchen dashboard (#5, B2C).
  *
- * Operators at the normal/local kitchens (Marathahalli, Kalyan Nagar, and JP
- * Nagar's own assembly op). Code role: LOCAL_KITCHEN. EVERY read/write is
+ * Operators at the normal/local kitchens (Marathahalli, Kalyan Nagar, Jayanagar,
+ * and JP Nagar's own assembly op). Code role: LOCAL_KITCHEN. EVERY read/write is
  * BRANCH-SCOPED to req.user.branchCode (from the JWT) — Marathahalli never sees
- * Kalyan's data.
+ * Jayanagar's data.
  *
  * They receive dispatched sub-recipes from the base kitchen (Head Chef), do final
  * assembly, audit their own stock, and request replenishment (raw → Stock
@@ -20,6 +20,7 @@ import BrandStock from "../models/brandStock.js";
 import IngredientIndent from "../models/ingredientIndent.js";
 import Projection from "../models/projection.js";
 import MenuEntry from "../models/menuEntry.js";
+import { stripDeletedMenuItems } from "../utils/menuVisibility.js";
 import MainRecipe from "../models/mainrecipe.models.js";
 import SubRecipe from "../models/subrecipe.models.js";
 import SubrecipeDispatch from "../models/subrecipeDispatch.js";
@@ -481,7 +482,7 @@ export async function getMenu(req, res) {
     const branch = kitchenBranch(req);
     // Branch-scoped: only this kitchen's menu entries.
     const list = await MenuEntry.find({ clientId: brand._id, branchCode: branch }).sort({ createdAt: -1 }).lean();
-    return res.json({ success: true, data: list });
+    return res.json({ success: true, data: stripDeletedMenuItems(list) });
   } catch (err) {
     console.error("[LocalKitchen] getMenu error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load menu" });

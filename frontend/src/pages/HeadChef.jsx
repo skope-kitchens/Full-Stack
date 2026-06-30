@@ -20,6 +20,7 @@ const BRANCH_DISPLAY = {
   TESTBRANCH: "Test Branch",
   MARATHAHALLI: "Marathahalli",
   KALYANNAGAR: "Kalyan Nagar",
+  JAYANAGAR: "Jayanagar",
   JPNAGAR_KITCHEN: "JP Nagar (Assembly)",
 };
 const loc = (code) =>
@@ -28,7 +29,7 @@ const loc = (code) =>
 
 // Dispatch destinations (local kitchens). TESTBRANCH is included so the test
 // Local Kitchen login (branchCode TESTBRANCH) can receive dispatches end-to-end.
-const LOCAL_KITCHENS = ["MARATHAHALLI", "KALYANNAGAR", "JPNAGAR_KITCHEN", "TESTBRANCH"];
+const LOCAL_KITCHENS = ["MARATHAHALLI", "KALYANNAGAR", "JAYANAGAR", "JPNAGAR_KITCHEN", "TESTBRANCH"];
 const TRIAL_CODES = ["T1", "T2", "T3"];
 const TRAINING_CODES = ["TR1", "TR2", "TR3"];
 
@@ -1066,7 +1067,7 @@ function RistaView({ brandName }) {
     <Card title="Purchase Register vs Rista POS" right={
       <div className="flex items-center gap-2">
         <select className={inputCls} value={branchCode} onChange={(e) => setBranchCode(e.target.value)}>
-          {["JPNAGAR", "MARATHAHALLI", "KALYANNAGAR"].map((b) => <option key={b} value={b}>{loc(b)}</option>)}
+          {["JPNAGAR", "MARATHAHALLI", "KALYANNAGAR", "JAYANAGAR"].map((b) => <option key={b} value={b}>{loc(b)}</option>)}
         </select>
         <button className={btnGhost} onClick={load}>Compare</button>
       </div>

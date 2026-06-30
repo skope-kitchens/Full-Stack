@@ -8,14 +8,14 @@ import FcrIterationTimeline from "../components/FcrIterationTimeline";
 
 /* ============================================================
  * Local Kitchen Dashboard (#5 of 6, B2C).
- * One login per kitchen (Marathahalli / Kalyan Nagar / JP Nagar assembly). Every
+ * One login per kitchen (Marathahalli / Kalyan Nagar / Jayanagar / JP Nagar assembly). Every
  * view is BRANCH-SCOPED to the JWT branchCode. Receives dispatched sub-recipes,
  * does final assembly, audits its own stock, requests replenishment. No money.
  * ========================================================== */
 
 const BRANCH_DISPLAY = {
   JPNAGAR: "JP Nagar", JPNAGAR_KITCHEN: "JP Nagar (Assembly)", MARATHAHALLI: "Marathahalli",
-  KALYANNAGAR: "Kalyan Nagar", TESTBRANCH: "Test Branch",
+  KALYANNAGAR: "Kalyan Nagar", JAYANAGAR: "Jayanagar", TESTBRANCH: "Test Branch",
 };
 const loc = (code) =>
   BRANCH_DISPLAY[code] ||

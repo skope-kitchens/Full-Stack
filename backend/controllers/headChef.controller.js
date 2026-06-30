@@ -41,6 +41,7 @@ import { getWarehouseStockAvailable } from "./purchaseRegister.controller.js";
 import { getDishIterations } from "../utils/iterationFcr.js";
 import { emitProcurementLog } from "../utils/procurementLog.js";
 import { buildAuditItems, reconcileAuditToLedger, normalizeAuditDate } from "../utils/producerAudit.js";
+import { stripDeletedMenuItems } from "../utils/menuVisibility.js";
 import { ristaClient } from "../ristaClient.js";
 import {
   buildTemplateWorkbook,
@@ -1012,7 +1013,7 @@ export async function getMenu(req, res) {
     const brand = await resolveBrandUser(req.params.brandName);
     if (!brand) return res.status(404).json({ message: "No client record for this brand" });
     const list = await MenuEntry.find({ clientId: brand._id }).sort({ createdAt: -1 }).lean();
-    return res.json({ success: true, data: list });
+    return res.json({ success: true, data: stripDeletedMenuItems(list) });
   } catch (err) {
     console.error("[HeadChef] getMenu error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load menu" });

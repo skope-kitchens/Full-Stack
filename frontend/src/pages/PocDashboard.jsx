@@ -18,6 +18,7 @@ const BRANCH_DISPLAY = {
   TESTBRANCH: "Test Branch",
   MARATHAHALLI: "Marathahalli",
   KALYANNAGAR: "Kalyan Nagar",
+  JAYANAGAR: "Jayanagar",
 };
 const KNOWN_BRANCHES = Object.keys(BRANCH_DISPLAY);
 

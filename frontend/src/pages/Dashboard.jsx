@@ -14,6 +14,7 @@ const BRANCH_DISPLAY = {
   TESTBRANCH: "Test Branch",
   MARATHAHALLI: "Marathahalli",
   KALYANNAGAR: "Kalyan Nagar",
+  JAYANAGAR: "Jayanagar",
 };
 
 const formatMoney = (value) =>
@@ -105,6 +106,11 @@ export default function Dashboard() {
   const [menuBranchCode, setMenuBranchCode] = useState("");
   const [menuSaving, setMenuSaving] = useState(false);
   const [submittedMenu, setSubmittedMenu] = useState([]);
+  // Single-item edit: { entryId, itemId } when the modal is in edit mode (null = create mode)
+  const [editTarget, setEditTarget] = useState(null);
+  // Soft-delete confirmation: { entryId, itemId, recipeName } when the dialog is open
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deletingItem, setDeletingItem] = useState(false);
 
   // Logo popup
   const [showLogoModal, setShowLogoModal] = useState(false);
@@ -213,8 +219,76 @@ export default function Dashboard() {
     }
   };
 
-  /* ---------------- Menu submit (reused) ---------------- */
+  /* ---------------- Menu modal helpers (create + edit reuse one modal) -------- */
+  const closeMenuModal = () => {
+    setShowEnterMenu(false);
+    setEditTarget(null);
+    setMenuRows([{ recipeName: "", qty: 1, uom: "PC", cost: 0 }]);
+  };
+
+  // Open the shared modal in EDIT mode, pre-populated with one item's four fields.
+  const openEditItem = (item) => {
+    setEditTarget({ entryId: item.entryId, itemId: item._id });
+    setMenuRows([
+      {
+        recipeName: item.recipeName || "",
+        qty: Number(item.qty || 1),
+        uom: item.uom || "",
+        cost: Number(item.cost || 0),
+      },
+    ]);
+    setShowEnterMenu(true);
+  };
+
+  // Soft-delete a single item after confirmation.
+  const confirmDeleteItem = async () => {
+    if (!deleteTarget) return;
+    try {
+      setDeletingItem(true);
+      await api.delete(`/api/menu-items/${deleteTarget.entryId}/items/${deleteTarget.itemId}`);
+      setDeleteTarget(null);
+      toast.success("Menu item removed");
+      loadSubmittedMenu(homeBranch);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to remove menu item");
+    } finally {
+      setDeletingItem(false);
+    }
+  };
+
+  /* ---------------- Menu submit (reused for create AND edit) ---------------- */
   const submitMenu = async () => {
+    // EDIT mode: PUT the single item's four editable fields.
+    if (editTarget) {
+      const row = menuRows[0] || {};
+      const recipeName = String(row.recipeName || "").trim();
+      const qty = Number(row.qty || 0);
+      const uom = String(row.uom || "").trim();
+      const cost = Number(row.cost || 0);
+      if (!recipeName || qty <= 0 || !uom) {
+        toast.error("Recipe, quantity and UOM are required");
+        return;
+      }
+      try {
+        setMenuSaving(true);
+        await api.put(`/api/menu-items/${editTarget.entryId}/items/${editTarget.itemId}`, {
+          recipeName,
+          qty,
+          uom,
+          cost,
+        });
+        closeMenuModal();
+        toast.success("Menu item updated");
+        loadSubmittedMenu(homeBranch);
+      } catch (err) {
+        toast.error(err.response?.data?.message || "Failed to update menu item");
+      } finally {
+        setMenuSaving(false);
+      }
+      return;
+    }
+
+    // CREATE mode (unchanged).
     const items = menuRows
       .map((row) => ({
         recipeName: String(row.recipeName || "").trim(),
@@ -426,9 +500,15 @@ export default function Dashboard() {
                 setHomeBranch={setHomeBranch}
                 submittedMenu={submittedMenu}
                 onOpenMenu={() => {
+                  setEditTarget(null);
+                  setMenuRows([{ recipeName: "", qty: 1, uom: "PC", cost: 0 }]);
                   setMenuBranchCode(homeBranch);
                   setShowEnterMenu(true);
                 }}
+                onEditItem={openEditItem}
+                onDeleteItem={(item) =>
+                  setDeleteTarget({ entryId: item.entryId, itemId: item._id, recipeName: item.recipeName })
+                }
                 onOpenLogo={() => setShowLogoModal(true)}
               />
             )}
@@ -524,27 +604,29 @@ export default function Dashboard() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-2xl w-[95vw] max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-2xl font-bold">Enter Menu</h2>
-              <button onClick={() => setShowEnterMenu(false)} className="text-gray-500 hover:text-black text-2xl">
+              <h2 className="text-2xl font-bold">{editTarget ? "Edit Menu Item" : "Enter Menu"}</h2>
+              <button onClick={closeMenuModal} className="text-gray-500 hover:text-black text-2xl">
                 ✕
               </button>
             </div>
             <div className="flex-1 overflow-auto p-6">
-              <div className="mb-4 max-w-xs">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Kitchen Branch</label>
-                <select
-                  value={menuBranchCode}
-                  onChange={(e) => setMenuBranchCode(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                >
-                  <option value="">Select branch…</option>
-                  {branches.map((b) => (
-                    <option key={b.branchCode} value={b.branchCode}>
-                      {b.displayName}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!editTarget && (
+                <div className="mb-4 max-w-xs">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Kitchen Branch</label>
+                  <select
+                    value={menuBranchCode}
+                    onChange={(e) => setMenuBranchCode(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  >
+                    <option value="">Select branch…</option>
+                    {branches.map((b) => (
+                      <option key={b.branchCode} value={b.branchCode}>
+                        {b.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="border rounded-lg overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100">
@@ -625,32 +707,36 @@ export default function Dashboard() {
                           />
                         </td>
                         <td className="p-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setMenuRows((prev) => prev.filter((_, i) => i !== idx))}
-                            className="text-red-600 hover:underline text-sm"
-                          >
-                            Delete
-                          </button>
+                          {!editTarget && (
+                            <button
+                              type="button"
+                              onClick={() => setMenuRows((prev) => prev.filter((_, i) => i !== idx))}
+                              className="text-red-600 hover:underline text-sm"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <button
-                type="button"
-                onClick={() => setMenuRows((prev) => [...prev, { recipeName: "", qty: 1, uom: "PC", cost: 0 }])}
-                className="mt-4 text-blue-600 text-sm hover:underline"
-              >
-                + Add Row
-              </button>
+              {!editTarget && (
+                <button
+                  type="button"
+                  onClick={() => setMenuRows((prev) => [...prev, { recipeName: "", qty: 1, uom: "PC", cost: 0 }])}
+                  className="mt-4 text-blue-600 text-sm hover:underline"
+                >
+                  + Add Row
+                </button>
+              )}
             </div>
             <div className="flex justify-end gap-3 p-4 border-t">
               <button
                 type="button"
                 className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-                onClick={() => setShowEnterMenu(false)}
+                onClick={closeMenuModal}
               >
                 Cancel
               </button>
@@ -666,6 +752,43 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Soft-delete confirmation */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl w-[90vw] max-w-md overflow-hidden">
+            <div className="p-6 border-b">
+              <h2 className="text-lg font-semibold text-slate-900">Remove menu item</h2>
+            </div>
+            <div className="p-6 space-y-2">
+              {deleteTarget.recipeName && (
+                <p className="text-sm font-medium text-slate-900">{deleteTarget.recipeName}</p>
+              )}
+              <p className="text-sm text-slate-600">
+                Are you sure? This item will be hidden from your menu but past orders will be preserved.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t">
+              <button
+                type="button"
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingItem}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingItem}
+                className="px-4 py-2 text-sm rounded-lg bg-black text-white disabled:opacity-50 hover:bg-gray-800"
+                onClick={confirmDeleteItem}
+              >
+                {deletingItem ? "Removing..." : "Remove item"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
@@ -673,9 +796,13 @@ export default function Dashboard() {
 /* ============================================================
  * HOME VIEW
  * ========================================================== */
-function HomeView({ profile, branches, homeBranch, setHomeBranch, submittedMenu, onOpenMenu, onOpenLogo }) {
+function HomeView({ profile, branches, homeBranch, setHomeBranch, submittedMenu, onOpenMenu, onEditItem, onDeleteItem, onOpenLogo }) {
   const brandName = profile?.brandName || "Your Brand";
-  const menuItemsForBranch = submittedMenu.flatMap((entry) => entry.items || []);
+  // Flatten items across entries, keeping each item's entryId + _id so edit/delete
+  // can target the exact subdocument.
+  const menuItemsForBranch = submittedMenu.flatMap((entry) =>
+    (entry.items || []).map((it) => ({ ...it, entryId: entry._id }))
+  );
 
   return (
     <div className="space-y-6">
@@ -743,15 +870,33 @@ function HomeView({ profile, branches, homeBranch, setHomeBranch, submittedMenu,
                   <th className="p-2 text-right">Qty</th>
                   <th className="p-2 text-left">UOM</th>
                   <th className="p-2 text-right">Selling Price (₹)</th>
+                  <th className="p-2 text-right w-32">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {menuItemsForBranch.map((it, i) => (
-                  <tr key={i} className="border-t">
+                  <tr key={it._id || i} className="border-t">
                     <td className="p-2 font-medium">{it.recipeName}</td>
                     <td className="p-2 text-right">{it.qty}</td>
                     <td className="p-2 uppercase text-xs text-gray-500">{it.uom}</td>
                     <td className="p-2 text-right">{formatMoney(it.cost)}</td>
+                    <td className="p-2 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => onEditItem(it)}
+                        className="text-sm text-slate-700 hover:text-black hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <span className="text-gray-300 mx-2">|</span>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteItem(it)}
+                        className="text-sm text-red-600 hover:text-red-700 hover:underline"
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

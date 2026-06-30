@@ -62,7 +62,7 @@ Skope Kitchens is a cloud kitchen operations company based in Bangalore, India. 
 **Branches (B2C base → local model):**
 - JP Nagar — Head Office + **base kitchen** + central warehouse (Dry Store + Chiller + Freezer). Vendor procurement and centralized **sub-recipe production** happen here. Trials & training also happen here. Primary operational hub.
 - Marathahalli — **local / normal kitchen**. No warehouse. Receives prepared sub-recipes from the base kitchen and does final assembly only. (Live-operations phase.)
-- Kalyan Nagar — **local / normal kitchen**, internal brands (Al Mashawi + KKK). Future expansion context. (Live-operations phase.)
+- Jayanagar — **local / normal kitchen**, internal brands (Al Mashawi + KKK). Future expansion context. (Live-operations phase.) (Renamed from "Kalyan Nagar" — branchCode `JAYANAGAR`; see §27.)
 - Note: "Head Office" is just a UI label for JP Nagar — same entity, no separate backend branch, no pipeline/architecture impact.
 
 **Brand Categories:**
@@ -667,7 +667,7 @@ CRUD still routes to the existing RECIPE_MANAGER-gated APIs (`/api/mainrecipes`,
 **Run-once after deploy:** add the `.env` keys below and run `node backend/scripts/seedAdminUsers.js` once (idempotent upsert; same pattern as the POC account) so the three Local Kitchen logins exist:
 ```
 ADMIN_LOCALKITCHEN_1_USERNAME=...        ADMIN_LOCALKITCHEN_1_PASSWORD=...   ADMIN_LOCALKITCHEN_1_BRANCH_CODE=MARATHAHALLI
-ADMIN_LOCALKITCHEN_2_USERNAME=...        ADMIN_LOCALKITCHEN_2_PASSWORD=...   ADMIN_LOCALKITCHEN_2_BRANCH_CODE=KALYANNAGAR
+ADMIN_LOCALKITCHEN_2_USERNAME=...        ADMIN_LOCALKITCHEN_2_PASSWORD=...   ADMIN_LOCALKITCHEN_2_BRANCH_CODE=JAYANAGAR
 ADMIN_LOCALKITCHEN_3_USERNAME=...        ADMIN_LOCALKITCHEN_3_PASSWORD=...   ADMIN_LOCALKITCHEN_3_BRANCH_CODE=JPNAGAR_KITCHEN
 ```
 
@@ -820,6 +820,80 @@ Per the no-emoji convention used by POC/Stock Manager/Head Chef/Local Kitchen, A
 **Scope guard:** all endpoints RECIPE_MANAGER-gated; brand validated to exist as a client `User` (`resolveBrandUser`) before any read/write; 5MB cap; memory storage (no disk write); full transaction rollback on commit failure.
 
 **Deferred (still not built):** the Word-SOP → Excel AI extraction step (stage 1 of the original two-stage conversion) — this build covers Excel → DB only.
+
+## 27. Feature Log — Branch Rename: KALYANNAGAR → JAYANAGAR (built)
+
+**SUPERSEDED by §29.** The rename approach described below was reverted before deployment because the business decision changed: Kalyan Nagar remains in the system as a closed-but-present branch, and Jayanagar was added as a new sibling branch instead. The migration script described below was never run and has been deleted. Read §29 for the current state.
+
+**What it is:** A pure rename of the local kitchen previously known internally as **"Kalyan Nagar"** (branchCode `KALYANNAGAR`) to **"Jayanagar"** (branchCode `JAYANAGAR`, display "Jayanagar"). Two parts: a CODE change (display labels, branch lists, the seeded LOCAL_KITCHEN account, `.env`) and a DATA migration script. **No schema, index, or structural change** — branch-code VALUES only.
+
+**Code changed (active files only):**
+- Backend display/Rista maps: `client.controller.js` (`BRANCH_DISPLAY` + `RISTA_BRANCH_MAP` `JAYANAGAR: null`), `poc.controller.js` (`BRANCH_DISPLAY`). Comment-only: `localKitchen.controller.js`, `seedAdminUsers.js`, `models/adminUser.js`, `models/subrecipeDispatch.js`.
+- Frontend display maps + branch lists: `Dashboard.jsx`, `PocDashboard.jsx`, `StockManager.jsx`, `FridgeAudit.jsx`, `AdminDashboard.jsx`, `ProjectionForm.jsx`, `HeadChef.jsx` (display map + `LOCAL_KITCHENS` array + dispatch-branch dropdown), `LocalKitchen.jsx` (display map + comment).
+- `backend/.env`: `ADMIN_LOCALKITCHEN_2_USERNAME` → `jayanagar@skopekitchens.com`, `ADMIN_LOCALKITCHEN_2_BRANCH_CODE` → `JAYANAGAR`. **Production (Render) env must be updated with these same two keys.**
+- **Left frozen by design:** `Dashboard.legacy.jsx`, `AdminDashboard.legacy.jsx` (rollback snapshots) and `docs/DECISIONS.md` (historical record) still say "Kalyan Nagar".
+
+**Migration script — `backend/scripts/renameKalyanToJayanagar.js`:** idempotent (filters on OLD value, writes NEW → 2nd run is a no-op); per-collection try/catch with a final matched/modified summary; rollback = swap the OLD/NEW constants (+emails) and re-run. Covers branch-code VALUES in: `brand_stocks`, `subrecipe_dispatches` (`fromBranchCode`+`toBranchCode`), `producer_audits`, `ingredient_indents`, `production_orders`, `procurement_logs` (`metadata.branchCode`/`toBranchCode`/`fromBranchCode`), `menu_entries`, `projections`, `fridge_audits`, `mapped_ingredients`, `orders`, `purchase_register` (data-only — FEFO/schema untouched), `users.assignedBranches[]` (array element via `arrayFilters`), and `admin_users` (branchCode + email, with a guard that skips the email rename if a `jayanagar@…` admin already exists). **Not touched (confirmed no branchCode field):** `stock_updates`, `delivery_qc`. `brand_stocks.location` is an enum (`SEMI_FINISHED`/`BRANCH_KITCHEN`/`WAREHOUSE_*`), not a branch code — not migrated.
+
+**Run order (deploy):** 1) deploy code → 2) `node backend/scripts/renameKalyanToJayanagar.js` (once; verify summary counts) → 3) update the two `.env` keys on Render → 4) restart backend. Re-running `seedAdminUsers.js` is NOT required — the migration renames the existing AdminUser record in place. The Jayanagar kitchen operator logs in with the new email `jayanagar@skopekitchens.com` (same password).
+
+**Known low-risk note:** `branchStoreMapper.js#getAnalyticsBranchCode()` already maps the label `"jayanagar"` → `"JNG"` (legacy Rista store code, CLAUDE.md §8). The new dashboards use `RISTA_BRANCH_MAP` keyed by branchCode (`JAYANAGAR→null`), not the label map, so they are unaffected — left untouched.
+
+**Deferred:** `TESTBRANCH` rename is a separate task scheduled after testing — NOT touched here.
+
+## 28. Feature Log — Client Menu Item Edit + Soft-Delete (built, fixes BUG-001)
+
+**What it is:** The Client menu was create-only (BUG-001 / test C-02 expected create+edit+delete). Clients can now **edit** and **soft-delete** individual menu items. CLIENT-role feature, scoped to the brand's own client.
+
+**Data-model reality (important):** menu items are NOT one-doc-per-item. A `MenuEntry` document holds an `items[]` array of subdocuments, and each submission creates a new `MenuEntry`; the client's on-screen menu is the flattened union of `items` across that branch's entries.
+
+**Schema change — `menuItemSchema` in `backend/models/menuEntry.js` (the ONLY schema touched):**
+- `_id` **enabled** (was `{ _id: false }` → now `{ _id: true }`) so each item has a stable ObjectId to target.
+- Added `isDeleted: { type: Boolean, default: false }`. Soft-deleted subdocuments are **retained** (not pulled) so nothing referencing them by name/price loses history. No other field added; parent `menuEntrySchema` unchanged.
+
+**New endpoints (`backend/controllers/menuEntry.controller.js`, routes in `backend/routes/menuEntry.routes.js`, mounted at `/api`, `authMiddleware`-gated):**
+- `PUT /api/menu-items/:entryId/items/:itemId` (`editMenuItem`) — accepts **ONLY** `recipeName, qty, uom, cost`; any other key → **400**. Brand ownership: entry's `clientId` must equal requester → else **403** (reuses the client read-path scoping). If `recipeName` changes, it must exist as a `MainRecipe` for the client's brand (exact-brand anchored case-insensitive regex `brandExact`, same pattern as localKitchen/headChef) → else **400**. Editing a soft-deleted item → 404.
+- `DELETE /api/menu-items/:entryId/items/:itemId` (`softDeleteMenuItem`) — sets `isDeleted: true`, returns **200** (idempotent). Cross-brand → **403**.
+- `brandExact` imports `escapeRegex` from `bomExpander.js` (imported only — the protected file is NOT modified).
+
+**Read paths now filter soft-deleted items** via shared `backend/utils/menuVisibility.js` `stripDeletedMenuItems()` (JS filter after `.lean()`, since items is an array). All **five** consumers updated: `client.controller.js getMenu`, `localKitchen.controller.js getMenu`, `headChef.controller.js getMenu`, `poc.controller.js getMenu`, and `menuEntry.controller.js listMenuEntriesForBrand` (recipe-admin incoming queue). The manual order-entry picker reads `MainRecipe`, NOT the menu, so it needed no change. Orders carry their own `recipeName`/price snapshot and do **not** reference menu items, so soft-delete cannot break order history (confirmed).
+
+**Frontend (`frontend/src/pages/Dashboard.jsx`, `HomeView` + the shared Enter-Menu modal):** each menu row gets **Edit** / **Delete** controls. Edit reuses the existing inline modal in **edit-mode** (title "Edit Menu Item", branch selector + add-row + per-row delete hidden, single item, saves via `PUT`). Delete opens a confirmation dialog (black/slate palette, no emojis): *"Are you sure? This item will be hidden from your menu but past orders will be preserved."* The flatten now preserves `entryId` + item `_id` so controls target the exact subdocument. Price stays bound to `cost`.
+
+**Tested (18/18 via a temp harness run against the live DB, then deleted):** create; edit each of recipeName/qty/uom/cost individually then all together; reject unknown field (400); X-02 cross-brand edit + delete (403); recipe-from-another-brand (400); soft-delete (200) + DB flag set + subdoc retained; all five read paths hide the deleted item; edit-soft-deleted (404).
+
+**Follow-ups (logged, intentionally NOT fixed in this PR):**
+1. **Field-naming drift** — backend/schema field is `cost`; UI labels it "Selling Price (₹)". Kept as-is per instruction.
+2. **Create/edit asymmetry** — edit validates recipe-brand ownership (400); `createMenuEntry` does NOT validate the recipe at all. Do not tighten create in this PR.
+3. **No client-action audit logging** — `procurement_logs` is admin/producer-scoped (actor = AdminUser, enum lacks menu/client events); menu edits/deletes are not audited. Not invented here.
+
+## 29. Feature Log — Jayanagar Added as New Branch (supersedes §27)
+
+**What it is:** An **additive** branch change — **Jayanagar** is added as a brand-new local kitchen (branchCode `JAYANAGAR`, display "Jayanagar") **alongside** the existing **Kalyan Nagar** (branchCode `KALYANNAGAR`, display "Kalyan Nagar"), which stays fully present. This **reverts the §27 rename** and replaces it: there is **no rename and no data migration** — both branches now coexist as ordinary siblings.
+
+**Reason (business decision):** Kalyan Nagar is closed for now but may reopen, so it must remain in the system as a fully active branch (no `isActive`/dormant flag — operators simply don't log into it). Jayanagar is a separate new kitchen. The §27 single-branch rename no longer matched reality.
+
+**No DB migration needed / performed.** The §27 migration script (`renameKalyanToJayanagar.js`) **was never run against any database** (verified: `admin_users` still held the original `kalyannagar@`/`KALYANNAGAR` record, and all branch-coded collections had zero `KALYANNAGAR` *and* zero `JAYANAGAR` data). The additive approach requires **no data changes** — only seeding the new Jayanagar admin. The script has been **deleted**.
+
+**Code changes — Part A (revert §27 rename, restore Kalyan Nagar):**
+- `backend/controllers/client.controller.js` — restored `KALYANNAGAR: "Kalyan Nagar"` in `BRANCH_DISPLAY` and `KALYANNAGAR: null` in `RISTA_BRANCH_MAP`.
+- `backend/controllers/poc.controller.js` — restored `KALYANNAGAR: "Kalyan Nagar"` in `BRANCH_DISPLAY`.
+- `backend/.env` — `ADMIN_LOCALKITCHEN_2_*` restored to `kalyannagar@skopekitchens.com` / `KALYANNAGAR` (its pre-§27 value).
+- `backend/scripts/seedAdminUsers.js`, `backend/models/adminUser.js`, `backend/models/subrecipeDispatch.js`, `backend/controllers/localKitchen.controller.js` — comment wording restored to mention **both** Kalyan Nagar and Jayanagar (comment-only; no logic). No branchCode enum exists anywhere — `branchCode` is a free `String`, so nothing structural to extend.
+- **Deleted** `backend/scripts/renameKalyanToJayanagar.js`.
+- Frontend (9 non-legacy files) — restored `KALYANNAGAR`/"Kalyan Nagar" alongside the existing `JAYANAGAR`: `Dashboard.jsx`, `PocDashboard.jsx`, `StockManager.jsx`, `FridgeAudit.jsx`, `AdminDashboard.jsx`, `LocalKitchen.jsx` (BRANCH_DISPLAY maps), `ProjectionForm.jsx` (BRANCH_OPTIONS), `HeadChef.jsx` (BRANCH_DISPLAY + `LOCAL_KITCHENS` array + the dispatch-branch dropdown). Legacy snapshots (`*.legacy.jsx`) left untouched.
+
+**Code changes — Part B (add Jayanagar as new branch):**
+- `backend/.env` — added **`ADMIN_LOCALKITCHEN_5_USERNAME=jayanagar@skopekitchens.com`**, **`ADMIN_LOCALKITCHEN_5_PASSWORD=123456`**, **`ADMIN_LOCALKITCHEN_5_BRANCH_CODE=JAYANAGAR`** (slot 5; slot 2 stays Kalyan Nagar, slot 4 is the test kitchen). **Render production `.env` needs these same three keys added.**
+- `backend/scripts/seedAdminUsers.js` — no structural change: the LOCAL_KITCHEN seed is a contiguous env-loop (`ADMIN_LOCALKITCHEN_<n>_*`), so slot 5 is picked up automatically and upserted by email (additive — existing admins untouched).
+- `backend/controllers/client.controller.js` + `poc.controller.js` — `JAYANAGAR: "Jayanagar"` in `BRANCH_DISPLAY`, `JAYANAGAR: null` in `RISTA_BRANCH_MAP` (no Rista POS for Jayanagar). Both branches now present in every map.
+- Frontend — `JAYANAGAR`/"Jayanagar" present alongside `KALYANNAGAR` in the same 9 files.
+- `backend/utils/branchStoreMapper.js` — unchanged; its legacy label map already has `"jayanagar" → "JNG"` and never had a `kalyannagar` key.
+- No `.env.example` exists in the repo, so there was nothing to mirror.
+
+**Operational note:** From the system's perspective **both kitchens are fully functional** — both have a LOCAL_KITCHEN login, both render in every branch picker, both can receive dispatches and hold stock. Nothing in the code disables Kalyan Nagar; operators simply choose not to use it while it's closed.
+
+**Run-once after deploy:** add the three `.env` keys (dev done; Render pending) and run `node backend/scripts/seedAdminUsers.js` (idempotent upsert-by-email) so the Jayanagar admin exists. Kalyan Nagar's existing admin is unaffected.
 
 ## graphify
 

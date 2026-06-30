@@ -17,6 +17,7 @@
  */
 import User from "../models/user.js";
 import MenuEntry from "../models/menuEntry.js";
+import { stripDeletedMenuItems } from "../utils/menuVisibility.js";
 import Projection from "../models/projection.js";
 import StockUpdate from "../models/stockUpdate.js";
 import BrandServiceChecklist from "../models/brandServiceChecklist.js";
@@ -56,6 +57,7 @@ const BRANCH_DISPLAY = {
   TESTBRANCH: "Test Branch",
   MARATHAHALLI: "Marathahalli",
   KALYANNAGAR: "Kalyan Nagar",
+  JAYANAGAR: "Jayanagar",
 };
 const KNOWN_BRANCHES = Object.keys(BRANCH_DISPLAY);
 
@@ -1116,7 +1118,7 @@ export async function getMenu(req, res) {
     const client = await loadClient(req, res, "_id");
     if (!client) return;
     const list = await MenuEntry.find({ clientId: client._id }).sort({ createdAt: -1 }).lean();
-    return res.json({ success: true, data: list });
+    return res.json({ success: true, data: stripDeletedMenuItems(list) });
   } catch (err) {
     console.error("[POC] getMenu error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load menu" });

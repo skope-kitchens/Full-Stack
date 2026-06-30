@@ -56,7 +56,7 @@ const deliveryQcSchema = new mongoose.Schema(
     grnGroupId: {
       type: mongoose.Schema.Types.ObjectId,
       default: null,
-      index: true,
+      // Index declared once below via deliveryQcSchema.index({ grnGroupId: 1 }).
     },
 
     // Procurement invoice(s) (User.invoices subdoc _ids) this GRN is linked to —

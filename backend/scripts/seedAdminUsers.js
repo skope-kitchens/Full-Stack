@@ -84,7 +84,7 @@ for (let i = 1; process.env[`ADMIN_INGREDIENT_${i}_USERNAME`]; i++) {
     role: "INGREDIENT_MANAGER",
     name: `Ingredient Manager ${i}`,
     warehouseId: process.env[`ADMIN_INGREDIENT_${i}_WAREHOUSE_ID`] || null,
-    // The kitchens this warehouse supplies, comma-separated (e.g. "JPNAGAR,MARATHAHALLI,KALYANNAGAR").
+    // The kitchens this warehouse supplies, comma-separated (e.g. "JPNAGAR,MARATHAHALLI,KALYANNAGAR,JAYANAGAR").
     branchCodes: branchCodesRaw
       .split(",")
       .map((c) => c.trim())
@@ -92,7 +92,7 @@ for (let i = 1; process.env[`ADMIN_INGREDIENT_${i}_USERNAME`]; i++) {
   });
 }
 
-// Local Kitchen operators — ONE login per kitchen (Marathahalli, Kalyan Nagar,
+// Local Kitchen operators — ONE login per kitchen (Marathahalli, Kalyan Nagar, Jayanagar,
 // and JP Nagar's own assembly op). Each is scoped to a single branchCode, which
 // scopes every Local Kitchen view to that kitchen's data. Numbered blocks like
 // the Recipe/Ingredient managers above — add ADMIN_LOCALKITCHEN_<n>_* to .env,

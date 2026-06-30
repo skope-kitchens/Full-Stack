@@ -9,6 +9,7 @@ import DeliveryQc from "../models/deliveryQc.js";
 import Order from "../models/order.js";
 import cloudinary from "../config/cloudinary.js";
 import { computeBrandSalesSummary } from "../utils/salesSummary.js";
+import { stripDeletedMenuItems } from "../utils/menuVisibility.js";
 import { computeBrandFcrSummary } from "./costing.controller.js";
 import { getDishIterations as fetchDishIterations } from "../utils/iterationFcr.js";
 import FcrConfirmation from "../models/fcrConfirmation.js";
@@ -27,6 +28,7 @@ const BRANCH_DISPLAY = {
   TESTBRANCH: "Test Branch",
   MARATHAHALLI: "Marathahalli",
   KALYANNAGAR: "Kalyan Nagar",
+  JAYANAGAR: "Jayanagar",
 };
 
 // Map a client branch code → Rista branch code (per CLAUDE.md §8).
@@ -36,6 +38,7 @@ const RISTA_BRANCH_MAP = {
   JPNAGAR: "BEN",
   MARATHAHALLI: "MAR",
   KALYANNAGAR: null,
+  JAYANAGAR: null,
   TESTBRANCH: null,
 };
 
@@ -244,7 +247,7 @@ export async function getMenu(req, res) {
     }
 
     const list = await MenuEntry.find(q).sort({ createdAt: -1 }).lean();
-    return res.json({ success: true, data: list });
+    return res.json({ success: true, data: stripDeletedMenuItems(list) });
   } catch (err) {
     console.error("getMenu error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load menu" });
