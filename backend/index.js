@@ -58,7 +58,9 @@ const server = http.createServer(app);
 
 const productionOrigins = [
   "https://full-stack-8ug9.onrender.com",
+  "https://full-stack-ten-pearl.vercel.app"
 ];
+
 
 const localhostPattern = /^http:\/\/localhost:\d+$/;
 

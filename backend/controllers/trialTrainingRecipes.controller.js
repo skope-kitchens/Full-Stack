@@ -1,5 +1,6 @@
 import TrialRecipe from "../models/trialRecipe.models.js";
 import TrainingRecipe from "../models/trainingRecipe.models.js";
+import { escapeRegex } from "../utils/bomExpander.js";
 
 export const createTrialRecipe = async (req, res) => {
   try {
@@ -48,7 +49,14 @@ export const createTrainingRecipe = async (req, res) => {
 
 export const listTrialRecipes = async (req, res) => {
   try {
-    const docs = await TrialRecipe.find({})
+    const { brand } = req.query;
+    let filter = {};
+    if (brand) {
+      filter = { brand: { $regex: `^${escapeRegex(brand)}$`, $options: "i" } };
+    } else {
+      console.warn("listTrialRecipes called without brand filter — potential cross-brand leak");
+    }
+    const docs = await TrialRecipe.find(filter)
       .sort({ createdAt: -1 })
       .lean();
     return res.json({ success: true, data: docs });
@@ -60,7 +68,14 @@ export const listTrialRecipes = async (req, res) => {
 
 export const listTrainingRecipes = async (req, res) => {
   try {
-    const docs = await TrainingRecipe.find({})
+    const { brand } = req.query;
+    let filter = {};
+    if (brand) {
+      filter = { brand: { $regex: `^${escapeRegex(brand)}$`, $options: "i" } };
+    } else {
+      console.warn("listTrainingRecipes called without brand filter — potential cross-brand leak");
+    }
+    const docs = await TrainingRecipe.find(filter)
       .sort({ createdAt: -1 })
       .lean();
     return res.json({ success: true, data: docs });

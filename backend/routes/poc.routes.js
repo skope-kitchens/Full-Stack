@@ -36,8 +36,11 @@ import {
   patchProcurementMode,
   postProcurementList,
   getProcurementList,
+  patchProcurementListPrices,
   getIngredientLists,
   acknowledgeIngredientList,
+  patchIngredientListPrices,
+  postRaiseInvoiceFromList,
   getMenu,
   getProjections,
   patchClientType,
@@ -86,10 +89,13 @@ router.get("/clients/:clientId/invoices", getInvoices);
 router.patch("/clients/:clientId/procurement-mode", patchProcurementMode);
 router.post("/clients/:clientId/procurement-list", postProcurementList);
 router.get("/clients/:clientId/procurement-list", getProcurementList);
+router.patch("/clients/:clientId/procurement-list/prices", patchProcurementListPrices);
 
 /* 8b. Ingredient lists from the Head Chef (read + acknowledge) */
 router.get("/clients/:clientId/ingredient-lists", getIngredientLists);
 router.patch("/clients/:clientId/ingredient-lists/:listId/acknowledge", acknowledgeIngredientList);
+router.patch("/clients/:clientId/ingredient-lists/:listId/prices", patchIngredientListPrices);
+router.post("/clients/:clientId/ingredient-lists/:listId/raise-invoice", postRaiseInvoiceFromList);
 
 /* 9. Menu & projections — view-only */
 router.get("/clients/:clientId/menu", getMenu);

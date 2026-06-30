@@ -217,6 +217,7 @@ export async function sendIngredientListToPoc(req, res) {
       phase,
       code,
       recipeName: recipe.recipeName || "",
+      listType: "BOM_EXTRACTED",
       items,
       sentBy: req.user?._id || req.user?.adminId || null,
       sentAt: now,
@@ -228,13 +229,83 @@ export async function sendIngredientListToPoc(req, res) {
       brandName: client.brandName,
       refId: doc._id,
       refCollection: "ingredient_lists_to_poc",
-      metadata: { phase, code, recipeName: recipe.recipeName, itemCount: items.length },
+      metadata: { phase, code, recipeName: recipe.recipeName, itemCount: items.length, listType: "BOM_EXTRACTED" },
     });
 
     return res.status(201).json({ success: true, data: doc });
   } catch (err) {
     console.error("[HeadChef] sendIngredientListToPoc error:", err?.message || err);
     return res.status(500).json({ message: "Failed to send ingredient list" });
+  }
+}
+
+/* ============================================================
+ * 3b. Custom Ingredient List → POC (pre-BOM, hand-typed) — ADDITIVE.
+ * For T1 of a brand-new dish where no recipe/BOM exists yet. The Head Chef
+ * types the ingredients manually; this never touches a recipe/sub-recipe/
+ * ItemMaster — it's purely a procurement communication to the POC, landing
+ * in the SAME ingredient_lists_to_poc collection as the BOM-extracted path.
+ * ========================================================== */
+const VALID_CUSTOM_UOMS = ["GM", "KG", "PC"];
+
+export async function sendCustomIngredientListToPoc(req, res) {
+  try {
+    const { clientId } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(String(clientId))) return res.status(400).json({ message: "Invalid clientId" });
+
+    const client = await User.findById(clientId).select("brandName").lean();
+    if (!client?.brandName) return res.status(404).json({ message: "Client brand not found" });
+
+    const phase = String(req.body?.phase || "").toUpperCase();
+    const code = String(req.body?.code || "").toUpperCase();
+    if (!["TRIAL", "TRAINING"].includes(phase)) return res.status(400).json({ message: "phase must be TRIAL or TRAINING" });
+    const validCodes = phase === "TRIAL" ? TRIAL_CODES : TRAINING_CODES;
+    if (!validCodes.includes(code)) return res.status(400).json({ message: `code must be one of ${validCodes.join("/")}` });
+
+    const recipeName = String(req.body?.recipeName || "").trim();
+    if (!recipeName) return res.status(400).json({ message: "recipeName is required" });
+
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (rawItems.length === 0) return res.status(400).json({ message: "At least one ingredient is required" });
+
+    const items = [];
+    for (const it of rawItems) {
+      const itemName = String(it?.itemName || "").trim();
+      const qty = Number(it?.qty);
+      const uom = String(it?.uom || "").toUpperCase().trim();
+      const manufacturerBrand = String(it?.manufacturerBrand || "").trim();
+      if (!itemName) return res.status(400).json({ message: "Every ingredient needs a name" });
+      if (!(qty > 0)) return res.status(400).json({ message: `"${itemName}" needs a quantity greater than 0` });
+      if (!VALID_CUSTOM_UOMS.includes(uom)) return res.status(400).json({ message: `"${itemName}" has an invalid uom — must be GM, KG, or PC` });
+      items.push({ itemName, qty, uom, refId: "", manufacturerBrand });
+    }
+
+    const now = new Date();
+    const doc = await IngredientListToPoc.create({
+      brandName: client.brandName,
+      clientId: client._id,
+      phase,
+      code,
+      recipeName,
+      listType: "CUSTOM",
+      items,
+      sentBy: req.user?._id || req.user?.adminId || null,
+      sentAt: now,
+    });
+
+    await emitProcurementLog({
+      eventType: "INGREDIENT_LIST_SENT_TO_POC",
+      req,
+      brandName: client.brandName,
+      refId: doc._id,
+      refCollection: "ingredient_lists_to_poc",
+      metadata: { phase, code, recipeName, itemCount: items.length, listType: "CUSTOM" },
+    });
+
+    return res.status(201).json({ success: true, data: doc });
+  } catch (err) {
+    console.error("[HeadChef] sendCustomIngredientListToPoc error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to send custom ingredient list" });
   }
 }
 

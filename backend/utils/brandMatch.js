@@ -13,14 +13,13 @@ function normBrand(s = "") {
 
 /**
  * Check if recipe brand matches logged-in user's brand.
- * Uses bidirectional substring: match if either contains the other.
- * e.g. user "AL Mashawi Shawarma" matches recipe "Al Mashawi"
- * e.g. user "Al Mashawi" matches recipe "AL Mashawi Shawarma"
+ * Exact match after normalization (no substring matching — substring
+ * matching allowed false positives like "Al" matching "Al Mashawi").
  */
 export function brandsMatch(userBrandName, recipeBrand) {
   if (!userBrandName || !recipeBrand) return false;
   const a = normBrand(userBrandName);
   const b = normBrand(recipeBrand);
   if (!a || !b) return false;
-  return a.includes(b) || b.includes(a);
+  return a === b;
 }

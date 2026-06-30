@@ -16,6 +16,7 @@ import {
   postRecipeImportPreview,
   postRecipeImportCommit,
   sendIngredientListToPoc,
+  sendCustomIngredientListToPoc,
   promoteToFinal,
   getProductionPlan,
   postDispatch,
@@ -48,6 +49,7 @@ router.post("/ingredient", ...guard, addIngredient);
 
 // 3. Ingredient list → POC
 router.post("/clients/:clientId/ingredient-list", ...guard, sendIngredientListToPoc);
+router.post("/clients/:clientId/ingredient-list-custom", ...guard, sendCustomIngredientListToPoc);
 
 // 4. Promote to Final
 router.post("/promote-to-final", ...guard, promoteToFinal);

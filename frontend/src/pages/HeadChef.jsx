@@ -183,7 +183,7 @@ export default function HeadChef() {
               {activeView === "reorder" && <ReorderView brandName={selected.brandName} />}
               {activeView === "rista" && <RistaView brandName={selected.brandName} />}
               {activeView === "fcr" && <FcrView brandName={selected.brandName} clientId={selected.clientId} />}
-              {activeView === "menu" && <MenuProjectionsView brandName={selected.brandName} />}
+              {activeView === "menu" && <MenuProjectionsView brandName={selected.brandName} clientId={selected.clientId} />}
             </main>
           </div>
         )}
@@ -1105,6 +1105,10 @@ function FcrView({ brandName, clientId }) {
   const [dishes, setDishes] = useState([]);
   const [sendForm, setSendForm] = useState({ phase: "TRIAL", code: "T1", recipeName: "" });
   const [busy, setBusy] = useState(false);
+  const [sendMode, setSendMode] = useState("BOM"); // "BOM" | "CUSTOM"
+  const [customForm, setCustomForm] = useState({ phase: "TRIAL", code: "T1", recipeName: "" });
+  const [customItems, setCustomItems] = useState([{ itemName: "", manufacturerBrand: "", qty: "", uom: "GM" }]);
+  const [customBusy, setCustomBusy] = useState(false);
 
   useEffect(() => {
     api.get(`/api/head-chef/fcr/${encodeURIComponent(brandName)}`)
@@ -1140,37 +1144,166 @@ function FcrView({ brandName, clientId }) {
     finally { setBusy(false); }
   };
 
+  const customCodes = customForm.phase === "TRIAL" ? TRIAL_CODES : TRAINING_CODES;
+  const customItemsValid = customItems.length > 0 && customItems.every(
+    (it) => it.itemName.trim() && Number(it.qty) > 0
+  );
+  const canSendCustom = !customBusy && clientId && customForm.recipeName.trim() && customItemsValid;
+
+  const updateCustomItem = (i, patch) => {
+    setCustomItems((arr) => arr.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  };
+
+  const sendCustomList = async () => {
+    if (!clientId) return toast.error("No client id for this brand");
+    setCustomBusy(true);
+    try {
+      const payload = {
+        phase: customForm.phase,
+        code: customForm.code,
+        recipeName: customForm.recipeName.trim(),
+        items: customItems.map((it) => ({
+          itemName: it.itemName.trim(),
+          manufacturerBrand: it.manufacturerBrand.trim(),
+          qty: Number(it.qty),
+          uom: it.uom,
+        })),
+      };
+      const res = await api.post(`/api/head-chef/clients/${clientId}/ingredient-list-custom`, payload);
+      toast.success(`Sent ${res.data?.data?.items?.length || 0} ingredients for "${customForm.recipeName}" to POC`);
+      setCustomForm({ phase: "TRIAL", code: "T1", recipeName: "" });
+      setCustomItems([{ itemName: "", manufacturerBrand: "", qty: "", uom: "GM" }]);
+    } catch (e) { toast.error(errMsg(e, "Failed to send custom list")); }
+    finally { setCustomBusy(false); }
+  };
+
   return (
     <>
       <Card title="Send an ingredient list to the POC">
-        <p className="text-sm text-gray-600 mb-3">Pick a dish and its iteration; the ingredient list is generated from that recipe's BOM and sent to the POC for the procurement decision.</p>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-          <select className={inputCls} value={sendForm.phase} onChange={(e) => setSendForm({ ...sendForm, phase: e.target.value, code: (e.target.value === "TRIAL" ? TRIAL_CODES : TRAINING_CODES)[0] })}>
-            <option value="TRIAL">Trial</option>
-            <option value="TRAINING">Training</option>
-          </select>
-          <select className={inputCls} value={sendForm.code} onChange={(e) => setSendForm({ ...sendForm, code: e.target.value })}>
-            {codes.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select
-            className={inputCls}
-            value={sendForm.recipeName}
-            onChange={(e) => setSendForm({ ...sendForm, recipeName: e.target.value })}
-            disabled={recipeOptions.length === 0}
+        <div className="flex gap-2 mb-4">
+          <button
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${sendMode === "BOM" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600"}`}
+            onClick={() => setSendMode("BOM")}
           >
-            {recipeOptions.length === 0
-              ? <option value="">No recipes</option>
-              : <>
-                  <option value="">Select a dish…</option>
-                  {recipeOptions.map((n) => <option key={n} value={n}>{n}</option>)}
-                </>}
-          </select>
-          <button className={btn} disabled={busy || !sendForm.recipeName} onClick={sendList}>{busy ? "Sending…" : "Send to POC"}</button>
+            From Recipe (BOM)
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${sendMode === "CUSTOM" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600"}`}
+            onClick={() => setSendMode("CUSTOM")}
+          >
+            Custom List
+          </button>
         </div>
-        {recipeOptions.length === 0 && (
-          <p className="text-sm text-amber-700 mt-3">
-            No {sendForm.code} {sendForm.phase === "TRIAL" ? "trial" : "training"} recipes yet — create one in the {sendForm.phase === "TRIAL" ? "Trials" : "Training"} tab first.
-          </p>
+
+        {sendMode === "BOM" ? (
+          <>
+            <p className="text-sm text-gray-600 mb-3">Pick a dish and its iteration; the ingredient list is generated from that recipe's BOM and sent to the POC for the procurement decision.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <select className={inputCls} value={sendForm.phase} onChange={(e) => setSendForm({ ...sendForm, phase: e.target.value, code: (e.target.value === "TRIAL" ? TRIAL_CODES : TRAINING_CODES)[0] })}>
+                <option value="TRIAL">Trial</option>
+                <option value="TRAINING">Training</option>
+              </select>
+              <select className={inputCls} value={sendForm.code} onChange={(e) => setSendForm({ ...sendForm, code: e.target.value })}>
+                {codes.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select
+                className={inputCls}
+                value={sendForm.recipeName}
+                onChange={(e) => setSendForm({ ...sendForm, recipeName: e.target.value })}
+                disabled={recipeOptions.length === 0}
+              >
+                {recipeOptions.length === 0
+                  ? <option value="">No recipes</option>
+                  : <>
+                      <option value="">Select a dish…</option>
+                      {recipeOptions.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </>}
+              </select>
+              <button className={btn} disabled={busy || !sendForm.recipeName} onClick={sendList}>{busy ? "Sending…" : "Send to POC"}</button>
+            </div>
+            {recipeOptions.length === 0 && (
+              <p className="text-sm text-amber-700 mt-3">
+                No {sendForm.code} {sendForm.phase === "TRIAL" ? "trial" : "training"} recipes yet — create one in the {sendForm.phase === "TRIAL" ? "Trials" : "Training"} tab first.
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-amber-700 mb-3">
+              Use this when no recipe exists yet (e.g. first trial of a new dish). For later iterations, use "From Recipe" to extract ingredients from the existing BOM.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+              <select className={inputCls} value={customForm.phase} onChange={(e) => setCustomForm({ ...customForm, phase: e.target.value, code: (e.target.value === "TRIAL" ? TRIAL_CODES : TRAINING_CODES)[0] })}>
+                <option value="TRIAL">Trial</option>
+                <option value="TRAINING">Training</option>
+              </select>
+              <select className={inputCls} value={customForm.code} onChange={(e) => setCustomForm({ ...customForm, code: e.target.value })}>
+                {customCodes.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input
+                className={inputCls}
+                placeholder="Which dish is this for? (e.g. Chicken Biryani)"
+                value={customForm.recipeName}
+                onChange={(e) => setCustomForm({ ...customForm, recipeName: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              {customItems.map((it, i) => (
+                <div key={i} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                  <input
+                    className={`${inputCls} sm:col-span-4`}
+                    placeholder="Ingredient name"
+                    value={it.itemName}
+                    onChange={(e) => updateCustomItem(i, { itemName: e.target.value })}
+                  />
+                  <input
+                    className={`${inputCls} sm:col-span-3`}
+                    placeholder="Manufacturer brand (optional)"
+                    value={it.manufacturerBrand}
+                    onChange={(e) => updateCustomItem(i, { manufacturerBrand: e.target.value })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className={`${inputCls} sm:col-span-2`}
+                    placeholder="Qty"
+                    value={it.qty}
+                    onChange={(e) => updateCustomItem(i, { qty: e.target.value })}
+                  />
+                  <select
+                    className={`${inputCls} sm:col-span-2`}
+                    value={it.uom}
+                    onChange={(e) => updateCustomItem(i, { uom: e.target.value })}
+                  >
+                    <option value="GM">GM</option>
+                    <option value="KG">KG</option>
+                    <option value="PC">PC</option>
+                  </select>
+                  <button
+                    className="sm:col-span-1 text-gray-400 hover:text-red-500 px-2"
+                    onClick={() => setCustomItems((arr) => arr.filter((_, idx) => idx !== i))}
+                    disabled={customItems.length === 1}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-3 mt-4">
+              <button
+                className={btnGhost}
+                onClick={() => setCustomItems((arr) => [...arr, { itemName: "", manufacturerBrand: "", qty: "", uom: "GM" }])}
+              >
+                + Add Ingredient
+              </button>
+              <button className={btn} disabled={!canSendCustom} onClick={sendCustomList}>
+                {customBusy ? "Sending…" : "Send to POC"}
+              </button>
+            </div>
+          </>
         )}
       </Card>
 
@@ -1183,9 +1316,10 @@ function FcrView({ brandName, clientId }) {
 }
 
 /* ============================================================
- * 14. MENU & PROJECTIONS (read-only)
+ * 14. MENU & PROJECTIONS (read-only, except Review on pending projections)
  * ========================================================== */
-function MenuProjectionsView({ brandName }) {
+function MenuProjectionsView({ brandName, clientId }) {
+  const navigate = useNavigate();
   const [menu, setMenu] = useState([]);
   const [projections, setProjections] = useState([]);
 
@@ -1206,9 +1340,16 @@ function MenuProjectionsView({ brandName }) {
       </Card>
       <Card title="Projections">
         {projections.length === 0 ? emptyP("No projections.") : projections.map((p) => (
-          <div key={p._id} className="border-b border-gray-100 py-2 text-sm">
-            <span className="text-gray-500">{loc(p.branchCode)} · {p.type} · for {fmtDate(p.forDate)} · {p.status}</span>
-            <div className="text-gray-800">{(p.items || []).map((it) => `${it.recipeName} ×${it.targetQty}`).join(", ")}</div>
+          <div key={p._id} className="border-b border-gray-100 py-2 text-sm flex items-center justify-between gap-3">
+            <div>
+              <span className="text-gray-500">{loc(p.branchCode)} · {p.type} · for {fmtDate(p.forDate)} · {p.status}</span>
+              <div className="text-gray-800">{(p.items || []).map((it) => `${it.recipeName} ×${it.targetQty}`).join(", ")}</div>
+            </div>
+            {p.status === "PENDING_CHEF_REVIEW" && clientId && (
+              <button className={btnGhost} onClick={() => navigate(`/admin/projection/${clientId}`)}>
+                Review
+              </button>
+            )}
           </div>
         ))}
       </Card>
