@@ -115,7 +115,6 @@ export const getPendingProjections = async (req, res) => {
     const q = { status: "PENDING_CHEF_REVIEW" };
     if (brandName) q.brandName = String(brandName).trim();
     if (brandId) q.brandId = brandId;
-    if (req.user.role === "RECIPE_MANAGER") q.branchCode = req.user.branchCode;
 
     const list = await Projection.find(q)
       .sort({ forDate: 1, createdAt: 1 })
