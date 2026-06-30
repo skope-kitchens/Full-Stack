@@ -994,7 +994,7 @@ export async function patchProcurementMode(req, res) {
 // the list is empty and we do NOT mark it sent — no fabricated data.
 export async function postProcurementList(req, res) {
   try {
-    const client = await loadClient(req, res, "brandName");
+    const client = await loadClient(req, res, "brandName procurement");
     if (!client) return;
 
     const phaseKey = String(req.body?.phase || "").toUpperCase();
@@ -1010,11 +1010,28 @@ export async function postProcurementList(req, res) {
       const leaves = await extractIngredientsFromBOM(r.items, 1, client.brandName, new Set());
       all.push(...leaves);
     }
-    const aggregated = Array.from(aggregateIngredients(all).values()).map((d) => ({
-      itemName: d.itemName,
-      uom: d.uom,
-      qty: Number(d.qty.toFixed(4)),
-    }));
+
+    // Carry forward any previously-entered prices for items that still match
+    // by name — regenerating the list (e.g. recipe changed) must not silently
+    // wipe prices the POC already entered.
+    const prevItems = client.procurement?.[phase.key]?.ingredientList || [];
+    const prevPriceByName = new Map(
+      prevItems
+        .filter((it) => it.unitPrice != null)
+        .map((it) => [String(it.itemName || "").trim().toLowerCase(), it.unitPrice])
+    );
+
+    const aggregated = Array.from(aggregateIngredients(all).values()).map((d) => {
+      const qty = Number(d.qty.toFixed(4));
+      const prevPrice = prevPriceByName.get(d.itemName.trim().toLowerCase());
+      return {
+        itemName: d.itemName,
+        uom: d.uom,
+        qty,
+        unitPrice: prevPrice != null ? prevPrice : null,
+        totalPrice: prevPrice != null ? round2(qty * prevPrice) : null,
+      };
+    });
 
     if (aggregated.length === 0) {
       return res.json({
@@ -1026,15 +1043,21 @@ export async function postProcurementList(req, res) {
       });
     }
 
+    const allPriced = aggregated.every((it) => it.unitPrice != null);
+    const grandTotal = round2(aggregated.reduce((sum, it) => sum + Number(it.totalPrice || 0), 0));
+    const pricingStatus = allPriced ? "PRICED" : "AWAITING_PRICING";
+
     const now = new Date();
     await User.findByIdAndUpdate(client._id, {
       $set: {
         [`procurement.${phase.key}.ingredientList`]: aggregated,
         [`procurement.${phase.key}.listSentAt`]: now,
+        [`procurement.${phase.key}.grandTotal`]: grandTotal,
+        [`procurement.${phase.key}.pricingStatus`]: pricingStatus,
       },
     });
 
-    return res.json({ success: true, sent: true, phase: phaseKey, listSentAt: now, items: aggregated });
+    return res.json({ success: true, sent: true, phase: phaseKey, listSentAt: now, items: aggregated, grandTotal, pricingStatus });
   } catch (err) {
     console.error("[POC] postProcurementList error:", err?.message || err);
     return res.status(500).json({ message: "Failed to generate ingredient list" });
@@ -1057,10 +1080,71 @@ export async function getProcurementList(req, res) {
       mode: p.mode || "SKOPE_PROCURES",
       listSentAt: p.listSentAt || null,
       items: p.ingredientList || [],
+      grandTotal: p.grandTotal ?? null,
+      pricingStatus: p.pricingStatus || "AWAITING_PRICING",
     });
   } catch (err) {
     console.error("[POC] getProcurementList error:", err?.message || err);
     return res.status(500).json({ message: "Failed to load ingredient list" });
+  }
+}
+
+// Procurement (vendor) prices on the brand-wide ingredient list — separate
+// from FCR/recipe pricing (postFcrItem) and from the per-kitchen-list pricing
+// on ingredient_lists_to_poc. Same itemName-match-and-lock pattern as both.
+export async function patchProcurementListPrices(req, res) {
+  try {
+    const client = await loadClient(req, res, "_id procurement");
+    if (!client) return;
+
+    const phaseKey = String(req.body?.phase || "").toUpperCase();
+    const phase = PHASES[phaseKey];
+    if (!phase) return res.status(400).json({ message: "phase must be TRIAL or TRAINING" });
+
+    const list = client.procurement?.[phase.key]?.ingredientList || [];
+    if (list.length === 0) {
+      return res.status(400).json({ message: "No ingredient list has been generated for this phase yet" });
+    }
+
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (rawItems.length === 0) return res.status(400).json({ message: "At least one priced ingredient is required" });
+
+    const priceByName = new Map();
+    for (const entry of rawItems) {
+      const itemName = String(entry?.itemName || "").trim();
+      const unitPrice = Number(entry?.unitPrice);
+      if (!itemName) return res.status(400).json({ message: "Every priced entry needs an itemName" });
+      if (!(unitPrice > 0)) return res.status(400).json({ message: `"${itemName}" needs a unitPrice greater than 0` });
+      const key = itemName.toLowerCase();
+      if (!list.some((it) => String(it.itemName || "").trim().toLowerCase() === key)) {
+        return res.status(400).json({ message: `Unknown ingredient: "${itemName}"` });
+      }
+      priceByName.set(key, unitPrice);
+    }
+
+    const updated = list.map((it) => {
+      const key = String(it.itemName || "").trim().toLowerCase();
+      if (!priceByName.has(key)) return it;
+      const unitPrice = priceByName.get(key);
+      return { ...it, unitPrice, totalPrice: round2(Number(it.qty || 0) * unitPrice) };
+    });
+
+    const allPriced = updated.length > 0 && updated.every((it) => it.unitPrice != null);
+    const grandTotal = round2(updated.reduce((sum, it) => sum + Number(it.totalPrice || 0), 0));
+    const pricingStatus = allPriced ? "PRICED" : "AWAITING_PRICING";
+
+    await User.findByIdAndUpdate(client._id, {
+      $set: {
+        [`procurement.${phase.key}.ingredientList`]: updated,
+        [`procurement.${phase.key}.grandTotal`]: grandTotal,
+        [`procurement.${phase.key}.pricingStatus`]: pricingStatus,
+      },
+    });
+
+    return res.json({ success: true, phase: phaseKey, items: updated, grandTotal, pricingStatus });
+  } catch (err) {
+    console.error("[POC] patchProcurementListPrices error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to save prices" });
   }
 }
 
@@ -1106,6 +1190,138 @@ export async function acknowledgeIngredientList(req, res) {
   } catch (err) {
     console.error("[POC] acknowledgeIngredientList error:", err?.message || err);
     return res.status(500).json({ message: "Failed to acknowledge list" });
+  }
+}
+
+const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+
+/* ============================================================
+ * 8c. Procurement price entry + invoice raising on a kitchen list
+ * — ADDITIVE. This is a PROCUREMENT (vendor cost) price, separate from
+ * FCR/recipe pricing (postFcrItem). No connection to the FCR engine.
+ * ========================================================== */
+
+export async function patchIngredientListPrices(req, res) {
+  try {
+    const client = await loadClient(req, res, "_id");
+    if (!client) return;
+    const { listId } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(String(listId))) return res.status(400).json({ message: "Invalid list id" });
+
+    const doc = await IngredientListToPoc.findOne({ _id: listId, clientId: client._id });
+    if (!doc) return res.status(404).json({ message: "Ingredient list not found" });
+    if (doc.pricingStatus === "INVOICE_RAISED") {
+      return res.status(409).json({ message: "Invoice already raised for this list — prices are locked" });
+    }
+
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (rawItems.length === 0) return res.status(400).json({ message: "At least one priced ingredient is required" });
+
+    for (const entry of rawItems) {
+      const itemName = String(entry?.itemName || "").trim();
+      const unitPrice = Number(entry?.unitPrice);
+      if (!itemName) return res.status(400).json({ message: "Every priced entry needs an itemName" });
+      if (!(unitPrice > 0)) return res.status(400).json({ message: `"${itemName}" needs a unitPrice greater than 0` });
+
+      const target = doc.items.find((it) => it.itemName.trim().toLowerCase() === itemName.toLowerCase());
+      if (!target) return res.status(400).json({ message: `Unknown ingredient: "${itemName}"` });
+
+      target.unitPrice = unitPrice;
+      target.totalPrice = round2(target.qty * unitPrice);
+    }
+
+    const allPriced = doc.items.length > 0 && doc.items.every((it) => it.unitPrice != null);
+    doc.pricingStatus = allPriced ? "PRICED" : "AWAITING_PRICING";
+    doc.grandTotal = round2(doc.items.reduce((sum, it) => sum + Number(it.totalPrice || 0), 0));
+
+    await doc.save();
+    return res.json({ success: true, data: doc });
+  } catch (err) {
+    console.error("[POC] patchIngredientListPrices error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to save prices" });
+  }
+}
+
+export async function postRaiseInvoiceFromList(req, res) {
+  try {
+    const client = await loadClient(req, res, "assignedBranches email name procurement");
+    if (!client) return;
+    const { listId } = req.params;
+    if (!/^[0-9a-fA-F]{24}$/.test(String(listId))) return res.status(400).json({ message: "Invalid list id" });
+
+    const doc = await IngredientListToPoc.findOne({ _id: listId, clientId: client._id });
+    if (!doc) return res.status(404).json({ message: "Ingredient list not found" });
+    if (doc.pricingStatus === "INVOICE_RAISED") {
+      return res.status(409).json({ message: "Invoice already raised for this list" });
+    }
+    if (doc.pricingStatus !== "PRICED") {
+      return res.status(400).json({ message: "All ingredients must be priced before raising an invoice" });
+    }
+    if (!(doc.grandTotal > 0)) {
+      return res.status(400).json({ message: "Grand total must be greater than 0" });
+    }
+
+    const phase = PHASES[doc.phase];
+    const mode = client.procurement?.[phase?.key]?.mode || "SKOPE_PROCURES";
+    if (mode !== "SKOPE_PROCURES") {
+      return res.status(400).json({ message: "Client is self-procuring for this phase; no invoice needed." });
+    }
+
+    let order;
+    try {
+      order = await createInvoiceOrder(doc.grandTotal, "PROC");
+    } catch (e) {
+      console.error("[POC] Razorpay order failed:", e?.message || e);
+      return res.status(502).json({ message: "Could not create payment order" });
+    }
+
+    const invoice = {
+      type: "PROCUREMENT",
+      amount: doc.grandTotal,
+      commission: 0,
+      notes: `Procurement for ${doc.recipeName || "dish"} ${doc.phase} ${doc.code}`,
+      branchCode: "",
+      attachmentUrl: null,
+      attachmentName: null,
+      supplementaryReason: "",
+      razorpayOrderId: order.id,
+      status: "UNPAID",
+      paidVia: null,
+      createdAt: new Date(),
+    };
+    const updated = await User.findByIdAndUpdate(
+      client._id,
+      { $push: { invoices: invoice } },
+      { new: true }
+    ).select("invoices");
+    const created = updated.invoices[updated.invoices.length - 1];
+
+    doc.invoiceId = created._id;
+    doc.pricingStatus = "INVOICE_RAISED";
+    await doc.save();
+
+    if (client.email) {
+      sendEmail({
+        to: client.email,
+        subject: `New PROCUREMENT invoice — Skope Kitchens`,
+        html: invoiceRaisedEmailHtml({
+          brandName: client.brandName,
+          type: "PROCUREMENT",
+          amount: doc.grandTotal,
+          commission: 0,
+          notes: invoice.notes,
+          branchCode: "",
+          attachmentUrl: "",
+          attachmentName: "",
+          supplementaryReason: "",
+        }),
+      }).catch(() => {});
+    }
+
+    return res.status(201).json({ success: true, invoice: created, razorpayOrderId: order.id, list: doc });
+  } catch (err) {
+    console.error("[POC] postRaiseInvoiceFromList error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to raise invoice" });
   }
 }
 

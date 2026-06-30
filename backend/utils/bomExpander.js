@@ -77,11 +77,13 @@ export async function extractIngredientsFromBOM(items, multiplier, brandName, vi
       const cycleKey = String(item.refId || "").trim().toLowerCase();
       if (!cycleKey || visited.has(cycleKey)) continue;
 
-      // Brand-scoped lookup first; fall back to any brand to handle shared sub-recipes.
-      const sub = await SubRecipe.findOne({ recipeName: item.refId, brand: brandName }).lean()
-        || await SubRecipe.findOne({ recipeName: item.refId }).lean();
+      // Brand-scoped lookup only — no cross-brand fallback (data-integrity fix).
+      const sub = await SubRecipe.findOne({ recipeName: item.refId, brand: brandName }).lean();
 
-      if (!sub) continue;
+      if (!sub) {
+        console.warn(`SubRecipe not found for brand: "${item.refId}" / "${brandName}"`);
+        continue;
+      }
 
       // sub.yield is the batch output size (e.g. 5 kg per batch of Garlic Mayo).
       // item.quantity is how much of this sub-recipe the parent recipe needs.

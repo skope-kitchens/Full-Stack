@@ -231,6 +231,40 @@ export async function getSopDocuments(req, res) {
 }
 
 /* ============================================================
+ * 4a-2. Procurement list — read-only view of the ingredient list (+ prices)
+ * the POC generated and sent for this phase. NO lifecycle gate (same
+ * precedent as SOP/Daily Stock) — relevant during IN_TRIAL, before LIVE.
+ * Never fabricates data: if nothing has been sent yet, listSentAt is null
+ * and items is empty.
+ * ========================================================== */
+export async function getProcurementListClient(req, res) {
+  try {
+    if (!requireClient(req, res)) return;
+
+    const phaseKey = String(req.query?.phase || "").toUpperCase();
+    if (!["TRIAL", "TRAINING"].includes(phaseKey)) {
+      return res.status(400).json({ message: "phase must be TRIAL or TRAINING" });
+    }
+    const phaseField = phaseKey === "TRIAL" ? "trial" : "training";
+
+    const user = await User.findById(req.user._id).select("procurement").lean();
+    const p = user?.procurement?.[phaseField] || {};
+
+    return res.json({
+      phase: phaseKey,
+      mode: p.mode || "SKOPE_PROCURES",
+      listSentAt: p.listSentAt || null,
+      items: p.ingredientList || [],
+      grandTotal: p.grandTotal ?? null,
+      pricingStatus: p.pricingStatus || "AWAITING_PRICING",
+    });
+  } catch (err) {
+    console.error("getProcurementListClient error:", err?.message || err);
+    return res.status(500).json({ message: "Failed to load procurement list" });
+  }
+}
+
+/* ============================================================
  * 4b. Menu — read back the client's own submitted menu (branch-scoped).
  * Submission itself reuses POST /api/menu-entries.
  * ========================================================== */

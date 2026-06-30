@@ -44,9 +44,12 @@ export default function AddRecipe() {
 
   useEffect(() => {
     const loadSubRecipes = async () => {
+      if (!brand) {
+        setSubRecipes([]);
+        return;
+      }
       try {
-        // Load all subrecipes from collection (no brand filtering)
-        const res = await api.get("/api/subrecipes");
+        const res = await api.get("/api/subrecipes", { params: { brand } });
         setSubRecipes(Array.isArray(res.data) ? res.data : []);
       } catch (e) {
         console.error("Failed to load subrecipes", e);
@@ -55,7 +58,7 @@ export default function AddRecipe() {
     };
 
     loadSubRecipes();
-  }, []);
+  }, [brand]);
 
   useEffect(() => {
     const loadBrands = async () => {
@@ -75,8 +78,12 @@ export default function AddRecipe() {
   // Strict sequential selection: recipeName dropdown only from Training TR3, filtered by current recipeType
   useEffect(() => {
     const loadTrainingNames = async () => {
+      if (!brand) {
+        setTrainingNameOptions([]);
+        return;
+      }
       try {
-        const res = await api.get("/api/training-recipes");
+        const res = await api.get("/api/training-recipes", { params: { brand } });
         const list = res.data?.data || [];
         const names = list
           .filter((r) => {
@@ -96,15 +103,15 @@ export default function AddRecipe() {
       }
     };
     loadTrainingNames();
-  }, [recipeType]);
+  }, [recipeType, brand]);
 
   // Sequential versioning prefill: MAIN prefill from Training TR3 (same recipeName)
   useEffect(() => {
     const prefill = async () => {
       const name = String(recipeName || "").trim();
-      if (!name) return;
+      if (!name || !brand) return;
       try {
-        const res = await api.get("/api/training-recipes");
+        const res = await api.get("/api/training-recipes", { params: { brand } });
         const list = res.data?.data || [];
         const prev = list.find((r) => r.recipeName === name && r.trainingCode === "TR3");
         if (prev?.items?.length) {
@@ -118,7 +125,7 @@ export default function AddRecipe() {
       }
     };
     prefill();
-  }, [recipeName, recipeType]);
+  }, [recipeName, recipeType, brand]);
 
 
 
@@ -275,6 +282,7 @@ export default function AddRecipe() {
                 key={i}
                 node={item}
                 subRecipes={subRecipes}
+                brand={brand}
                 onChange={(updated) => {
                   const arr = [...items];
                   arr[i] = updated;

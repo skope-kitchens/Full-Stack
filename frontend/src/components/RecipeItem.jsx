@@ -1,7 +1,7 @@
 import { SubRecipeDropdown } from "./DropDowns.jsx";
 import api from "../utils/api.js";
 
-export default function RecipeItem({ node, onChange, subRecipes }) {
+export default function RecipeItem({ node, onChange, subRecipes, brand }) {
   const update = (patch) => onChange({ ...node, ...patch });
 
   const isIngredient = node.type === "INGREDIENT";
@@ -72,7 +72,8 @@ export default function RecipeItem({ node, onChange, subRecipes }) {
               if (!recipeName) return;
 
               const res = await api.get(
-                `/api/subrecipes/${encodeURIComponent(recipeName)}/cost`
+                `/api/subrecipes/${encodeURIComponent(recipeName)}/cost`,
+                { params: { brand } }
               );
 
               update({

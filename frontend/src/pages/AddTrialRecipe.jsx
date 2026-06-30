@@ -38,8 +38,12 @@ export default function AddTrialRecipe() {
 
   useEffect(() => {
     const loadSubRecipes = async () => {
+      if (!brand) {
+        setSubRecipes([]);
+        return;
+      }
       try {
-        const res = await api.get("/api/subrecipes");
+        const res = await api.get("/api/subrecipes", { params: { brand } });
         setSubRecipes(Array.isArray(res.data) ? res.data : []);
       } catch (e) {
         console.error("Failed to load subrecipes", e);
@@ -47,7 +51,7 @@ export default function AddTrialRecipe() {
       }
     };
     loadSubRecipes();
-  }, []);
+  }, [brand]);
 
   useEffect(() => {
     const loadBrands = async () => {
@@ -70,13 +74,14 @@ export default function AddTrialRecipe() {
   // T3 => recipeName dropdown from T2
   useEffect(() => {
     const prefill = async () => {
+      if (trialCode === "T1") {
+        setTrialNameOptions([]);
+        return;
+      }
+      if (!brand) return;
       try {
-        const res = await api.get("/api/trial-recipes");
+        const res = await api.get("/api/trial-recipes", { params: { brand } });
         const list = res.data?.data || [];
-        if (trialCode === "T1") {
-          setTrialNameOptions([]);
-          return;
-        }
         const want = trialCode === "T2" ? "T1" : "T2";
         const names = list
           .filter((r) => r.trialCode === want)
@@ -93,7 +98,7 @@ export default function AddTrialRecipe() {
       }
     };
     prefill();
-  }, [trialCode, recipeName]);
+  }, [trialCode, recipeName, brand]);
 
   const saveRecipe = async () => {
     const payload = {
@@ -218,6 +223,7 @@ export default function AddTrialRecipe() {
                 key={i}
                 node={item}
                 subRecipes={subRecipes}
+                brand={brand}
                 onChange={(updated) => {
                   const arr = [...items];
                   arr[i] = updated;

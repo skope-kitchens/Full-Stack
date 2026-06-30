@@ -29,6 +29,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const DRAWER_ITEMS = [
   { key: "onboarding", label: "Service Onboarding Status" },
   { key: "sop", label: "SOP Documents" },
+  { key: "procurementList", label: "Procurement List" },
   { key: "projections", label: "Enter Projections", gate: "LIVE" },
   { key: "dailyStock", label: "Daily Stock" },
   { key: "auditHistory", label: "Audit History", gate: "LIVE" },
@@ -516,6 +517,7 @@ export default function Dashboard() {
             {activeView === "onboarding" && <OnboardingView />}
 
             {activeView === "sop" && <SopView />}
+            {activeView === "procurementList" && <ProcurementListView />}
 
             {activeView === "projections" &&
               (isLive ? (
@@ -987,6 +989,110 @@ function SopView() {
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+/* ============================================================
+ * PROCUREMENT LIST VIEW — ingredient list (+ procurement prices) the POC
+ * generated and sent for this phase. Read-only. NO lifecycle gate (same
+ * precedent as SOP/Daily Stock — relevant during IN_TRIAL, before LIVE).
+ * Separate from FCR pricing — this is the vendor cost the POC entered.
+ * ========================================================== */
+function ProcurementListView() {
+  const [phase, setPhase] = useState("TRIAL");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    api
+      .get("/api/client/procurement-list", { params: { phase } })
+      .then((res) => setData(res.data))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [phase]);
+
+  const items = data?.items || [];
+  const grandTotal = data?.grandTotal;
+
+  return (
+    <section className="bg-white rounded-2xl p-8 shadow space-y-6">
+      <h2 className="text-2xl font-semibold">Procurement List</h2>
+
+      <div className="flex gap-2">
+        {["TRIAL", "TRAINING"].map((p) => (
+          <button
+            key={p}
+            onClick={() => setPhase(p)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+              phase === p ? "bg-black text-white" : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {p === "TRIAL" ? "Trial" : "Training"}
+          </button>
+        ))}
+      </div>
+
+      {loading && <p className="text-gray-500">Loading…</p>}
+
+      {!loading && (!data || !data.listSentAt) && (
+        <p className="text-gray-500">
+          Your POC hasn't sent an ingredient list for {phase === "TRIAL" ? "Trial" : "Training"} yet.
+        </p>
+      )}
+
+      {!loading && data?.listSentAt && (
+        <>
+          <p className="text-sm text-gray-500">
+            Sent {new Date(data.listSentAt).toLocaleString()}
+            {data.mode === "CLIENT_PROCURES" ? " · You are procuring these ingredients" : " · Skope is procuring these ingredients"}
+          </p>
+
+          {items.length === 0 ? (
+            <p className="text-gray-500">No ingredients on this list.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-gray-500 text-left">
+                  <tr>
+                    <th className="py-2 pr-2">Item</th>
+                    <th className="py-2 pr-2">Qty</th>
+                    <th className="py-2 pr-2">UOM</th>
+                    <th className="py-2 pr-2">Unit Price</th>
+                    <th className="py-2 pr-2">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it, i) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="py-2 pr-2 text-gray-900">{it.itemName}</td>
+                      <td className="py-2 pr-2 text-gray-700">{it.qty}</td>
+                      <td className="py-2 pr-2 text-gray-700">{it.uom}</td>
+                      <td className="py-2 pr-2 text-gray-700">
+                        {it.unitPrice != null ? formatCurrency(it.unitPrice) : "—"}
+                      </td>
+                      <td className="py-2 pr-2 text-gray-700">
+                        {it.totalPrice != null ? formatCurrency(it.totalPrice) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {grandTotal != null && (
+                  <tfoot>
+                    <tr className="border-t border-gray-200 font-semibold">
+                      <td colSpan={4} className="py-2 pr-2 text-right text-gray-700">
+                        Grand Total
+                      </td>
+                      <td className="py-2 pr-2 text-gray-900">{formatCurrency(grandTotal)}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </section>
   );
 }

@@ -39,8 +39,12 @@ export default function AddTrainingRecipe() {
 
   useEffect(() => {
     const loadSubRecipes = async () => {
+      if (!brand) {
+        setSubRecipes([]);
+        return;
+      }
       try {
-        const res = await api.get("/api/subrecipes");
+        const res = await api.get("/api/subrecipes", { params: { brand } });
         setSubRecipes(Array.isArray(res.data) ? res.data : []);
       } catch (e) {
         console.error("Failed to load subrecipes", e);
@@ -48,7 +52,7 @@ export default function AddTrainingRecipe() {
       }
     };
     loadSubRecipes();
-  }, []);
+  }, [brand]);
 
   useEffect(() => {
     const loadBrands = async () => {
@@ -71,9 +75,13 @@ export default function AddTrainingRecipe() {
   // TR3 => recipeName dropdown from Training TR2
   useEffect(() => {
     const loadOptions = async () => {
+      if (!brand) {
+        setNameOptions([]);
+        return;
+      }
       try {
         if (trainingCode === "TR1") {
-          const res = await api.get("/api/trial-recipes");
+          const res = await api.get("/api/trial-recipes", { params: { brand } });
           const list = res.data?.data || [];
           const names = list
             .filter((r) => r.trialCode === "T3")
@@ -82,7 +90,7 @@ export default function AddTrainingRecipe() {
           setNameOptions(Array.from(new Set(names)).sort((a, b) => a.localeCompare(b)));
           return;
         }
-        const res = await api.get("/api/training-recipes");
+        const res = await api.get("/api/training-recipes", { params: { brand } });
         const list = res.data?.data || [];
         const want = trainingCode === "TR2" ? "TR1" : "TR2";
         const names = list
@@ -95,24 +103,24 @@ export default function AddTrainingRecipe() {
       }
     };
     loadOptions();
-  }, [trainingCode]);
+  }, [trainingCode, brand]);
 
   // Sequential versioning prefill:
   // TR1 prefill from Trial T3, TR2 from TR1, TR3 from TR2 (same recipeName)
   useEffect(() => {
     const prefill = async () => {
       const name = String(recipeName || "").trim();
-      if (!name) return;
+      if (!name || !brand) return;
       try {
         if (trainingCode === "TR1") {
-          const res = await api.get("/api/trial-recipes");
+          const res = await api.get("/api/trial-recipes", { params: { brand } });
           const list = res.data?.data || [];
           const prev = list.find((r) => r.recipeName === name && r.trialCode === "T3");
           if (prev?.items?.length) setItems(prev.items.map((i) => ({ ...i })));
           return;
         }
 
-        const res = await api.get("/api/training-recipes");
+        const res = await api.get("/api/training-recipes", { params: { brand } });
         const list = res.data?.data || [];
         const want = trainingCode === "TR2" ? "TR1" : "TR2";
         const prev = list.find((r) => r.recipeName === name && r.trainingCode === want);
@@ -123,7 +131,7 @@ export default function AddTrainingRecipe() {
       }
     };
     prefill();
-  }, [recipeName, trainingCode]);
+  }, [recipeName, trainingCode, brand]);
 
   const saveRecipe = async () => {
     const payload = {
@@ -254,6 +262,7 @@ export default function AddTrainingRecipe() {
                 key={i}
                 node={item}
                 subRecipes={subRecipes}
+                brand={brand}
                 onChange={(updated) => {
                   const arr = [...items];
                   arr[i] = updated;

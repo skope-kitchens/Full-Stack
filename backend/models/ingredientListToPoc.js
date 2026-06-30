@@ -18,6 +18,10 @@ const listItemSchema = new mongoose.Schema(
     qty: { type: Number, default: 0 },
     uom: { type: String, default: "" },
     refId: { type: String, default: "" },
+    manufacturerBrand: { type: String, default: "", trim: true },
+    // Procurement (vendor) price the POC enters — separate from FCR/recipe pricing.
+    unitPrice: { type: Number, default: null },
+    totalPrice: { type: Number, default: null },
   },
   { _id: false }
 );
@@ -29,11 +33,18 @@ const ingredientListToPocSchema = new mongoose.Schema(
     phase: { type: String, enum: ["TRIAL", "TRAINING"], required: true, index: true },
     code: { type: String, enum: ["T1", "T2", "T3", "TR1", "TR2", "TR3"], required: true },
     recipeName: { type: String, default: "", trim: true },
+    // BOM_EXTRACTED = generated from an existing recipe's BOM (original flow).
+    // CUSTOM = hand-typed by the Head Chef when no recipe/BOM exists yet (e.g. T1 of a new dish).
+    listType: { type: String, enum: ["BOM_EXTRACTED", "CUSTOM"], default: "BOM_EXTRACTED" },
     items: { type: [listItemSchema], default: [] },
     sentBy: { type: mongoose.Schema.Types.ObjectId, default: null },
     sentAt: { type: Date, default: Date.now, index: true },
     pocAcknowledgedAt: { type: Date, default: null, index: true },
     pocAcknowledgedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // Procurement pricing + invoice lifecycle (separate from FCR/recipe pricing).
+    pricingStatus: { type: String, enum: ["AWAITING_PRICING", "PRICED", "INVOICE_RAISED"], default: "AWAITING_PRICING" },
+    grandTotal: { type: Number, default: null },
+    invoiceId: { type: mongoose.Schema.Types.ObjectId, default: null },
   },
   { timestamps: true }
 );

@@ -8,6 +8,7 @@ import {
   getBranches,
   getOnboardingStatus,
   getSopDocuments,
+  getProcurementListClient,
   getMenu,
   getDailyStock,
   getFcr,
@@ -40,6 +41,9 @@ router.get("/onboarding-status", authMiddleware, getOnboardingStatus);
 
 // 3b. SOP documents (read-only, no lifecycle gate — POC enters, client reads)
 router.get("/sop", authMiddleware, getSopDocuments);
+
+// 3c. Procurement list — ingredient list + prices the POC sent (read-only, no lifecycle gate)
+router.get("/procurement-list", authMiddleware, getProcurementListClient);
 
 // 4. Menu read-back (branch-scoped). Submission reuses POST /api/menu-entries.
 router.get("/menu", authMiddleware, getMenu);

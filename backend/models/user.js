@@ -77,9 +77,14 @@ const userSchema = new mongoose.Schema(
             itemName: { type: String, default: "" },
             uom: { type: String, default: "" },
             qty: { type: Number, default: 0 },
+            // Procurement (vendor) price the POC enters — separate from FCR/recipe pricing.
+            unitPrice: { type: Number, default: null },
+            totalPrice: { type: Number, default: null },
           },
         ],
         listSentAt: { type: Date, default: null },
+        grandTotal: { type: Number, default: null },
+        pricingStatus: { type: String, enum: ["AWAITING_PRICING", "PRICED"], default: "AWAITING_PRICING" },
       },
       training: {
         mode: {
@@ -92,9 +97,13 @@ const userSchema = new mongoose.Schema(
             itemName: { type: String, default: "" },
             uom: { type: String, default: "" },
             qty: { type: Number, default: 0 },
+            unitPrice: { type: Number, default: null },
+            totalPrice: { type: Number, default: null },
           },
         ],
         listSentAt: { type: Date, default: null },
+        grandTotal: { type: Number, default: null },
+        pricingStatus: { type: String, enum: ["AWAITING_PRICING", "PRICED"], default: "AWAITING_PRICING" },
       },
     },
 

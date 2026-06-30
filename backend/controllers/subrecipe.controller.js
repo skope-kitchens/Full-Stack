@@ -1,5 +1,6 @@
 import SubRecipe from "../models/subrecipe.models.js";
 import { brandsMatch } from "../utils/brandMatch.js";
+import { escapeRegex } from "../utils/bomExpander.js";
 
 /* ---------------- HELPER ---------------- */
 const calculateItemCost = (item) => {
@@ -70,14 +71,22 @@ export const getSubRecipeDishList = async (req, res) => {
 export const getSubRecipeCost = async (req, res) => {
   try {
     const { recipeName } = req.params;
+    const { brand } = req.query;
+
+    if (!brand) {
+      return res.status(400).json({
+        message: "brand is required",
+      });
+    }
 
     const sub = await SubRecipe.findOne({
-      recipeName: { $regex: `^${recipeName}$`, $options: "i" },
+      recipeName: { $regex: `^${escapeRegex(recipeName)}$`, $options: "i" },
+      brand: { $regex: `^${escapeRegex(brand)}$`, $options: "i" },
     });
 
     if (!sub) {
       return res.status(404).json({
-        message: "SubRecipe not found",
+        message: "SubRecipe not found for this brand",
       });
     }
 

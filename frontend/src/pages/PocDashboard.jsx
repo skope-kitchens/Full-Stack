@@ -227,7 +227,7 @@ export default function PocDashboard() {
               )}
               {activeView === "sop" && <SopView clientId={selected.clientId} />}
               {activeView === "procurement" && (
-                <ProcurementView clientId={selected.clientId} onChange={refreshHeader} />
+                <ProcurementView clientId={selected.clientId} client={selected} onChange={refreshHeader} />
               )}
               {activeView === "branches" && (
                 <BranchesView client={selected} onChange={refreshHeader} />
@@ -1052,10 +1052,13 @@ function SopView({ clientId }) {
 /* ============================================================
  * 5. Procurement
  * ========================================================== */
-function ProcurementView({ clientId, onChange }) {
+function ProcurementView({ clientId, client, onChange }) {
   const [phase, setPhase] = useState("TRIAL");
-  const [info, setInfo] = useState({ mode: "SKOPE_PROCURES", listSentAt: null, items: [] });
+  const [info, setInfo] = useState({ mode: "SKOPE_PROCURES", listSentAt: null, items: [], grandTotal: null, pricingStatus: "AWAITING_PRICING" });
   const [busy, setBusy] = useState(false);
+  // Procurement (vendor) prices on the brand-wide list — separate from FCR pricing.
+  const [priceEdits, setPriceEdits] = useState({});
+  const [savingPrices, setSavingPrices] = useState(false);
   // Additive: ingredient lists sent by the Head Chef awaiting POC action.
   const [kitchenLists, setKitchenLists] = useState([]);
 
@@ -1063,14 +1066,17 @@ function ProcurementView({ clientId, onChange }) {
     try {
       const res = await api.get(`/api/poc/clients/${clientId}/procurement-list`, { params: { phase } });
       setInfo(res.data);
+      setPriceEdits({});
     } catch (e) {
       toast.error(errMsg(e, "Failed to load procurement"));
     }
   }, [clientId, phase]);
 
+  // Fetch ALL lists (not just PENDING) — a list still needs to be visible here
+  // for pricing/invoicing after the POC has already "marked it seen".
   const loadKitchenLists = useCallback(async () => {
     try {
-      const res = await api.get(`/api/poc/clients/${clientId}/ingredient-lists`, { params: { status: "PENDING" } });
+      const res = await api.get(`/api/poc/clients/${clientId}/ingredient-lists`);
       setKitchenLists(res.data?.data || []);
     } catch {
       /* non-blocking — panel just stays empty */
@@ -1123,6 +1129,39 @@ function ProcurementView({ clientId, onChange }) {
     }
   };
 
+  const priceKeyOf = (it) => String(it.itemName || "").trim().toLowerCase();
+  const priceOf = (it) => {
+    const k = priceKeyOf(it);
+    return priceEdits[k] !== undefined ? priceEdits[k] : it.unitPrice ?? "";
+  };
+  const totalOf = (it) => {
+    const p = Number(priceOf(it));
+    return p > 0 ? Number(it.qty || 0) * p : it.totalPrice ?? 0;
+  };
+  const grandTotalLive = (info.items || []).reduce((sum, it) => sum + Number(totalOf(it) || 0), 0);
+  const hasAnyPriceEdit = Object.keys(priceEdits).length > 0;
+
+  const savePrices = async () => {
+    const rows = (info.items || [])
+      .filter((it) => {
+        const v = priceEdits[priceKeyOf(it)];
+        return v !== undefined && Number(v) > 0;
+      })
+      .map((it) => ({ itemName: it.itemName, unitPrice: Number(priceEdits[priceKeyOf(it)]) }));
+    if (rows.length === 0) return;
+    setSavingPrices(true);
+    try {
+      await api.patch(`/api/poc/clients/${clientId}/procurement-list/prices`, { phase, items: rows });
+      toast.success("Prices saved — visible to the client");
+      await load();
+      onChange?.();
+    } catch (e) {
+      toast.error(errMsg(e, "Failed to save prices"));
+    } finally {
+      setSavingPrices(false);
+    }
+  };
+
   return (
     <>
       {kitchenLists.length > 0 && (
@@ -1131,20 +1170,17 @@ function ProcurementView({ clientId, onChange }) {
             The Head Chef sent these from a trial/training recipe. Review, then decide who procures below.
           </p>
           {kitchenLists.map((l) => (
-            <div key={l._id} className="border border-gray-200 rounded-lg p-3 mb-2">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-900">
-                  {l.phase} {l.code}{l.recipeName ? ` — ${l.recipeName}` : ""}{" "}
-                  <span className="text-xs text-gray-400">({(l.items || []).length} items · {new Date(l.sentAt).toLocaleDateString()})</span>
-                </span>
-                <button onClick={() => acknowledgeKitchenList(l._id)} className={btnGhost}>
-                  Mark seen
-                </button>
-              </div>
-              <div className="text-xs text-gray-600">
-                {(l.items || []).map((it) => `${it.itemName} ${it.qty}${it.uom}`).join(" · ")}
-              </div>
-            </div>
+            <KitchenListCard
+              key={l._id}
+              list={l}
+              clientId={clientId}
+              client={client}
+              onAcknowledge={acknowledgeKitchenList}
+              onChange={() => {
+                loadKitchenLists();
+                onChange?.();
+              }}
+            />
           ))}
         </Card>
       )}
@@ -1190,28 +1226,219 @@ function ProcurementView({ clientId, onChange }) {
           {(info.items || []).length === 0 ? (
             <p className="text-gray-400 text-sm">No list generated yet.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="text-gray-500 text-left">
-                <tr>
-                  <th className="py-2">Item</th>
-                  <th className="py-2">Qty</th>
-                  <th className="py-2">UOM</th>
-                </tr>
-              </thead>
-              <tbody>
-                {info.items.map((it, i) => (
-                  <tr key={i} className="border-t border-gray-100">
-                    <td className="py-2 text-gray-900">{it.itemName}</td>
-                    <td className="py-2 text-gray-700">{it.qty}</td>
-                    <td className="py-2 text-gray-700">{it.uom}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-gray-500 text-left">
+                    <tr>
+                      <th className="py-2 pr-2">Item</th>
+                      <th className="py-2 pr-2">Qty</th>
+                      <th className="py-2 pr-2">UOM</th>
+                      <th className="py-2 pr-2">Unit Price</th>
+                      <th className="py-2 pr-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {info.items.map((it, i) => (
+                      <tr key={i} className="border-t border-gray-100">
+                        <td className="py-2 pr-2 text-gray-900">{it.itemName}</td>
+                        <td className="py-2 pr-2 text-gray-700">{it.qty}</td>
+                        <td className="py-2 pr-2 text-gray-700">{it.uom}</td>
+                        <td className="py-2 pr-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            disabled={savingPrices}
+                            value={priceOf(it)}
+                            onChange={(e) =>
+                              setPriceEdits((ed) => ({ ...ed, [priceKeyOf(it)]: e.target.value }))
+                            }
+                            className={`${inputCls} w-24`}
+                          />
+                        </td>
+                        <td className="py-2 pr-2 text-gray-700">₹{Number(totalOf(it) || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-gray-200 font-medium">
+                      <td colSpan={4} className="py-2 pr-2 text-right text-gray-700">
+                        Grand Total
+                      </td>
+                      <td className="py-2 pr-2 text-gray-900">₹{grandTotalLive.toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                These are procurement (vendor) prices — visible to the client, separate from FCR pricing.
+              </p>
+              <button onClick={savePrices} disabled={savingPrices || !hasAnyPriceEdit} className={`${btn} mt-3`}>
+                {savingPrices ? "Saving…" : info.pricingStatus === "PRICED" ? "Update Prices" : "Save Prices"}
+              </button>
+            </>
           )}
         </div>
       </Card>
     </>
+  );
+}
+
+/* ============================================================
+ * 5b. Procurement price entry + invoice raising — one card per kitchen list.
+ * This is a PROCUREMENT (vendor cost) price, separate from FCR/recipe
+ * pricing (postFcrItem/FcrView) — no connection between the two.
+ * ========================================================== */
+function KitchenListCard({ list: l, clientId, client, onAcknowledge, onChange }) {
+  const [edits, setEdits] = useState({}); // itemName(lower) -> price string
+  const [busy, setBusy] = useState(false);
+
+  const items = l.items || [];
+  const keyOf = (it) => String(it.itemName || "").trim().toLowerCase();
+  const priceOf = (it) => {
+    const k = keyOf(it);
+    return edits[k] !== undefined ? edits[k] : it.unitPrice ?? "";
+  };
+  const totalOf = (it) => {
+    const p = Number(priceOf(it));
+    return p > 0 ? Number(it.qty || 0) * p : it.totalPrice ?? 0;
+  };
+  const grandTotalLive = items.reduce((sum, it) => sum + Number(totalOf(it) || 0), 0);
+
+  const locked = l.pricingStatus === "INVOICE_RAISED";
+  const hasAnyEdit = Object.keys(edits).length > 0;
+
+  const savePrices = async () => {
+    const rows = items
+      .filter((it) => {
+        const v = edits[keyOf(it)];
+        return v !== undefined && Number(v) > 0;
+      })
+      .map((it) => ({ itemName: it.itemName, unitPrice: Number(edits[keyOf(it)]) }));
+    if (rows.length === 0) return;
+    setBusy(true);
+    try {
+      await api.patch(`/api/poc/clients/${clientId}/ingredient-lists/${l._id}/prices`, { items: rows });
+      toast.success("Prices saved");
+      setEdits({});
+      onChange?.();
+    } catch (e) {
+      toast.error(errMsg(e, "Failed to save prices"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const raiseInvoice = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/api/poc/clients/${clientId}/ingredient-lists/${l._id}/raise-invoice`);
+      toast.success("Procurement invoice raised");
+      onChange?.();
+    } catch (e) {
+      toast.error(errMsg(e, "Failed to raise invoice"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const phaseKey = l.phase === "TRIAL" ? "trial" : "training";
+  const mode = client?.procurement?.[phaseKey]?.mode || "SKOPE_PROCURES";
+
+  const borderCls =
+    l.pricingStatus === "INVOICE_RAISED"
+      ? "border-green-200 bg-green-50"
+      : l.pricingStatus === "PRICED"
+      ? "border-gray-200"
+      : "border-amber-300 bg-amber-50";
+
+  return (
+    <div className={`border rounded-lg p-3 mb-3 ${borderCls}`}>
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <span className="text-sm font-medium text-gray-900">
+          {l.phase} {l.code}{l.recipeName ? ` — ${l.recipeName}` : ""}{" "}
+          <span className={`text-xs px-1.5 py-0.5 rounded ${l.listType === "CUSTOM" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
+            {l.listType === "CUSTOM" ? "Custom" : "From BOM"}
+          </span>{" "}
+          {l.pricingStatus === "INVOICE_RAISED" && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">Invoice raised</span>
+          )}{" "}
+          <span className="text-xs text-gray-400">
+            ({items.length} items · {new Date(l.sentAt).toLocaleDateString()})
+          </span>
+        </span>
+        {!l.pocAcknowledgedAt && (
+          <button onClick={() => onAcknowledge(l._id)} className={btnGhost}>
+            Mark seen
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-gray-500 text-left">
+            <tr>
+              <th className="py-1 pr-2">Item</th>
+              <th className="py-1 pr-2">Brand</th>
+              <th className="py-1 pr-2">Qty</th>
+              <th className="py-1 pr-2">UOM</th>
+              <th className="py-1 pr-2">Unit Price</th>
+              <th className="py-1 pr-2">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, i) => (
+              <tr key={i} className="border-t border-gray-100">
+                <td className="py-1 pr-2 text-gray-900">{it.itemName}</td>
+                <td className="py-1 pr-2 text-gray-500">{it.manufacturerBrand || "—"}</td>
+                <td className="py-1 pr-2 text-gray-700">{it.qty}</td>
+                <td className="py-1 pr-2 text-gray-700">{it.uom}</td>
+                <td className="py-1 pr-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    disabled={locked || busy}
+                    value={priceOf(it)}
+                    onChange={(e) => setEdits((ed) => ({ ...ed, [keyOf(it)]: e.target.value }))}
+                    className={`${inputCls} w-24`}
+                  />
+                </td>
+                <td className="py-1 pr-2 text-gray-700">₹{Number(totalOf(it) || 0).toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-gray-200 font-medium">
+              <td colSpan={5} className="py-1 pr-2 text-right text-gray-700">
+                Grand Total
+              </td>
+              <td className="py-1 pr-2 text-gray-900">₹{grandTotalLive.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="flex items-center gap-3 mt-3 flex-wrap">
+        {!locked && (
+          <button onClick={savePrices} disabled={busy || !hasAnyEdit} className={btn}>
+            {busy ? "Saving…" : l.pricingStatus === "PRICED" ? "Update Prices" : "Save Prices"}
+          </button>
+        )}
+        {l.pricingStatus === "PRICED" &&
+          (mode === "SKOPE_PROCURES" ? (
+            <button onClick={raiseInvoice} disabled={busy} className={btn}>
+              {busy ? "Raising…" : `Raise Procurement Invoice (₹${Number(l.grandTotal || 0).toFixed(2)})`}
+            </button>
+          ) : (
+            <span className="text-xs text-gray-500">Client is self-procuring. Prices saved for reference.</span>
+          ))}
+        {locked && (
+          <span className="text-xs text-gray-500">Invoice raised — see the Invoicing tab for payment status.</span>
+        )}
+      </div>
+    </div>
   );
 }
 
